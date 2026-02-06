@@ -2,10 +2,26 @@
 python -m venv venv
 
 # Activate virtual environment
-.\venv\Scripts\Activate.ps1
+Windows -> .\venv\Scripts\Activate.ps1
+Linux -> source venv/bin/activate
 
 # Export ALL installed packages with exact versions
 pip freeze > requirements.txt
 
 # Install all packages from requirements.txt
 pip install -r requirements.txt
+
+# Copy files to UCSC server (not heavy ones): run from project folder in my laptop
+scp -r `
+    $(Get-ChildItem -Recurse -File | Where-Object { 
+        $_.FullName -notmatch '_dataset' -and 
+        $_.FullName -notmatch '_downloads' -and 
+        $_.FullName -notmatch 'venv' -and 
+        $_.FullName -notmatch '__pycache__' 
+    }).FullName `
+    jon@128.114.59.177:~/Workspace/Low_Power_Satellite_6DoF_Pose_Estimation/
+
+# Remove a file / folder
+rm -rf filename.txt
+
+# Hello server
