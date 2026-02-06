@@ -12,7 +12,7 @@ from tqdm import tqdm
 import os
 import argparse
 
-from dataset import SatellitePoseDataset
+from main._1_dataset.dataset import SatellitePoseDataset
 from model import RGBEventPoseNet
 
 def pose_loss(pred, target):
