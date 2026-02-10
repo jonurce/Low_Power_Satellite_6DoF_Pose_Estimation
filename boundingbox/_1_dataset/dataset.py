@@ -100,13 +100,11 @@ class SatelliteBBDataset(Dataset):
             ])
         else:
             # Val/test: only normalization + ToTensor (no augmentations)
-            self.common_transform = A.Compose([
-
-            ], 
-            additional_targets={'event': 'image'},
-            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']),
-            # pascal_voc: [x_min, y_min, x_max, y_max]
-            # yolo: [cx, cy, w, h]
+            self.common_transform = A.Compose([], 
+                additional_targets={'event': 'image'},
+                bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']),
+                # pascal_voc: [x_min, y_min, x_max, y_max]
+                # yolo: [cx, cy, w, h]
             )
             self.rgb_transform = A.Compose([
                 ToTensorV2()
