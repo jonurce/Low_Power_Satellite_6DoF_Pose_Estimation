@@ -164,17 +164,17 @@ def main(args):
     # Model
     model = EventBBNet().to(device)
 
-    # Multi-GPU
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
-        model = nn.DataParallel(model)
-
     # TensorBoard
     writer = SummaryWriter(log_dir=model_dir)
 
     # Log model graph
     dummy_event = torch.randn(1, 1, 720, 800).to(device)
     writer.add_graph(model, dummy_event)
+
+    # Multi-GPU (after graph, so it does not crash)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
 
     # Optimizer & Scheduler
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
