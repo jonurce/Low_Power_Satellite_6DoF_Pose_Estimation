@@ -222,7 +222,7 @@ def main(args):
     criterion = yolo_loss
 
     # Early stopping
-    patience = 10
+    patience = 30
     min_delta_pct = 0.005
     best_val_loss = float('inf')
     epochs_no_improve = 0
@@ -269,8 +269,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
-    parser.add_argument("--batch_size",   type=int,   default=32,       help="Batch size")
-    parser.add_argument("--epochs",       type=int,   default=100,      help="Number of epochs")
+    parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
+    parser.add_argument("--epochs",       type=int,   default=200,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=1e-3,     help="Learning rate")
     parser.add_argument("--satellite",    type=str,   default="cassini", help="Satellite name")
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
