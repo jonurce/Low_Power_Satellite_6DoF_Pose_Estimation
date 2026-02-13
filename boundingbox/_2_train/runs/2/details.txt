@@ -11,4 +11,4 @@ Notes:           Single-class (satellite), event-only input
 Notes: total_loss = 10 * box_loss (MSE) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)
 Notes: higher LR: 4e-3 (4 times bigger than previous)
 Notes: patience 60 + max epochs 500
-Results: 
+Results: epoch 201 ; val_loss_box = 4 (~95px)

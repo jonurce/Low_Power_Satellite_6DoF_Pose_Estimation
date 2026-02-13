@@ -84,12 +84,58 @@ def yolo_loss(pred, target):
 
     # ── 5. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
+    # Box loss is measured in [0,1] normalized grid units
     box_mask = target_obj > 0.5
     box_loss = 0.0
+
+    # Option 1: MSE on box parameters (simple but less effective)
+    # if box_mask.any():
+    #     box_loss = nn.MSELoss(reduction='none')(pred_boxes, target_boxes)
+    #     box_loss = box_loss.mean(dim=-1)                # [B, num_cells]
+    #     box_loss = (box_loss * box_mask.float()).sum() / box_mask.sum().clamp(min=1)
+
+    # Option 2: CIoU loss (more complex but better convergence)
     if box_mask.any():
-        box_loss = nn.MSELoss(reduction='none')(pred_boxes, target_boxes)
-        box_loss = box_loss.mean(dim=-1)                # [B, num_cells]
-        box_loss = (box_loss * box_mask.float()).sum() / box_mask.sum().clamp(min=1)
+        # CIoU loss (standard implementation)
+        pred_xy = pred_boxes[..., :2]           # [B, num_cells, 2]
+        pred_wh = pred_boxes[..., 2:4]          # [B, num_cells, 2]
+        gt_xy = target_boxes[..., :2]           # [B, num_cells, 2]
+        gt_wh = target_boxes[..., 2:4]          # [B, num_cells, 2]
+
+        # Intersection area
+        inter_wh = torch.min(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
+                   torch.max(pred_xy - pred_wh/2, gt_xy - gt_wh/2)
+        inter_wh = torch.clamp(inter_wh, min=0.0)
+        inter_area = inter_wh[..., 0] * inter_wh[..., 1]
+
+        # Union area
+        pred_area = pred_wh[..., 0] * pred_wh[..., 1]
+        gt_area   = gt_wh[..., 0] * gt_wh[..., 1]
+        union_area = pred_area + gt_area - inter_area
+
+        # IoU
+        iou = inter_area / (union_area + 1e-6)
+
+        # Center distance squared
+        c2 = ((pred_xy - gt_xy)**2).sum(dim=-1)  # [B, num_cells]
+
+        # Smallest enclosing box diagonal squared
+        enclose_wh = torch.max(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
+                     torch.min(pred_xy - pred_wh/2, gt_xy - gt_wh/2)
+        enclose_wh = torch.clamp(enclose_wh, min=0.0)
+        enclose_diag = (enclose_wh[..., 0]**2 + enclose_wh[..., 1]**2) + 1e-6
+
+        # Aspect ratio consistency (v term)
+        v = (4 / (torch.pi**2)) * (torch.atan(pred_wh[..., 0]/pred_wh[..., 1].clamp(min=1e-6)) - \
+                                   torch.atan(gt_wh[..., 0]/gt_wh[..., 1].clamp(min=1e-6)))**2
+
+        # CIoU
+        alpha = v / ((1 - iou + v) + 1e-6)
+        ciou = iou - (c2 / enclose_diag) - alpha * v
+
+        # Mean over responsible cells
+        ciou_loss = (1 - ciou) * box_mask.float()
+        box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
 
     # Objectness loss — BCE everywhere
     obj_loss = nn.BCELoss()(pred_obj, target_obj)
@@ -191,6 +237,12 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
+        f.write(f"Notes: Notes: total_loss = 10 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
+        f.write(f"Notes: higher LR: 1e-3 (back to original)\n")
+        f.write(f"Notes: patience 60 + max epochs 500 (keep it high for convergence)\n")
+        f.write(f"Results: .....\n")
+
+        
 
     # Datasets & Loaders
     train_ds = SatelliteBBDataset(split='train', satellite=args.satellite, sequence=args.sequence, distance=args.distance)
@@ -271,7 +323,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
     parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
-    parser.add_argument("--lr",           type=float, default=4e-3,     help="Learning rate")
+    parser.add_argument("--lr",           type=float, default=1e-3,     help="Learning rate")
     parser.add_argument("--satellite",    type=str,   default="cassini", help="Satellite name")
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
     parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
