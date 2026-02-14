@@ -11,4 +11,4 @@ Notes:           Single-class (satellite), event-only input
 Notes: Notes: total_loss = 10 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)
 Notes: higher LR: 1e-3 (back to original)
 Notes: patience 60 + max epochs 500 (keep it high for convergence)
-Results: .....
+Results: 0.35 training box loss, and around 0.4 val box loss (aprox) - epoch 99 early stop

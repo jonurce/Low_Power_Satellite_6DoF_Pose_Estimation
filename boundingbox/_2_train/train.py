@@ -84,17 +84,22 @@ def yolo_loss(pred, target):
 
     # ── 5. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
-    # Box loss is measured in [0,1] normalized grid units
     box_mask = target_obj > 0.5
     box_loss = 0.0
 
     # Option 1: MSE on box parameters (simple but less effective)
+    # Box loss is measured in [0,1] normalized grid units
+    # box_loss of 1: entire cell off (720x800 image → 22.5x25 pixels)
+    # Aim for box_loss ~< 0.2 (4.5x5 pixels)
     # if box_mask.any():
     #     box_loss = nn.MSELoss(reduction='none')(pred_boxes, target_boxes)
     #     box_loss = box_loss.mean(dim=-1)                # [B, num_cells]
     #     box_loss = (box_loss * box_mask.float()).sum() / box_mask.sum().clamp(min=1)
 
     # Option 2: CIoU loss (more complex but better convergence)
+    # CIoU is in [0,1] (higher is better, 1 is perfect overlap)
+    # Box loss is 1 - CIoU, so 0 is perfect, 1 is no overlap very bad
+    # Aim for box_loss ~< 0.2
     if box_mask.any():
         # CIoU loss (standard implementation)
         pred_xy = pred_boxes[..., :2]           # [B, num_cells, 2]
@@ -143,8 +148,8 @@ def yolo_loss(pred, target):
     # Class loss — BCE on responsible cells (or everywhere if you want)
     cls_loss = nn.BCELoss()(pred_cls, target_cls)
 
-    # Total loss average per sample in the batch
-    total_loss = 10.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
+    # Total loss (average per sample in the batch)
+    total_loss = 20.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss
 
@@ -215,7 +220,7 @@ def main(args):
     print(f"Using device: {device}")
 
     # Create model directory with sequential numbering
-    counter = 0
+    counter = 3
     while True:
         model_subdir = f"{counter}"
         model_dir = os.path.join(args.save_dir, model_subdir)
@@ -237,9 +242,10 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
-        f.write(f"Notes: Notes: total_loss = 10 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
-        f.write(f"Notes: higher LR: 1e-3 (back to original)\n")
+        f.write(f"Notes: Notes: total_loss = 20 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
         f.write(f"Notes: patience 60 + max epochs 500 (keep it high for convergence)\n")
+        f.write(f"longer training: min_delta_pct from 0.005 (0.5%) to 0.0005 (0.05%)\n")
+        f.write(f"increase weight decay: from 1e-5 to 3e-5\n")
         f.write(f"Results: .....\n")
 
         
@@ -269,13 +275,13 @@ def main(args):
         model = nn.DataParallel(model)
 
     # Optimizer & Scheduler
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=3e-5)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     criterion = yolo_loss
 
     # Early stopping
     patience = 60
-    min_delta_pct = 0.005
+    min_delta_pct = 0.0005
     best_val_loss = float('inf')
     epochs_no_improve = 0
     max_epochs = args.epochs
@@ -323,7 +329,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
     parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
-    parser.add_argument("--lr",           type=float, default=1e-3,     help="Learning rate")
+    parser.add_argument("--lr",           type=float, default=5e-4,     help="Learning rate")
     parser.add_argument("--satellite",    type=str,   default="cassini", help="Satellite name")
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
     parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
