@@ -149,7 +149,7 @@ def yolo_loss(pred, target):
     cls_loss = nn.BCELoss()(pred_cls, target_cls)
 
     # Total loss (average per sample in the batch)
-    total_loss = 20.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
+    total_loss = 30.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss
 
@@ -242,10 +242,10 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
-        f.write(f"Notes: Notes: total_loss = 20 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
+        f.write(f"Notes: Notes: total_loss = 30 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
         f.write(f"Notes: patience 60 + max epochs 500 (keep it high for convergence)\n")
-        f.write(f"longer training: min_delta_pct from 0.005 (0.5%) to 0.0005 (0.05%)\n")
-        f.write(f"increase weight decay: from 1e-5 to 3e-5\n")
+        f.write(f"longer training: min_delta_pct 0.00005 (0.005%)\n")
+        f.write(f"increase weight decay to 6e-5\n")
         f.write(f"Results: .....\n")
 
         
@@ -275,13 +275,13 @@ def main(args):
         model = nn.DataParallel(model)
 
     # Optimizer & Scheduler
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=3e-5)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=6e-5)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     criterion = yolo_loss
 
     # Early stopping
     patience = 60
-    min_delta_pct = 0.0005
+    min_delta_pct = 0.00005
     best_val_loss = float('inf')
     epochs_no_improve = 0
     max_epochs = args.epochs
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
     parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
-    parser.add_argument("--lr",           type=float, default=5e-4,     help="Learning rate")
+    parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--satellite",    type=str,   default="cassini", help="Satellite name")
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
     parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
