@@ -8,8 +8,8 @@ Max epochs:      500
 Learning rate:   0.0003
 Device:          x2 GPUs
 Notes:           Single-class (satellite), event-only input
-Notes: Notes: total_loss = 30 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)
-Notes: patience 60 + max epochs 500 (keep it high for convergence)
+Notes: Notes: total_loss = 100 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)
+Notes: patience 100 + max epochs 500 (keep it high for convergence)
 longer training: min_delta_pct 0.00005 (0.005%)
 increase weight decay to 6e-5
-Results: val_box_loss = 0.28, train_loss_box = 0.32
+Results: .....

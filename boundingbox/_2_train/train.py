@@ -35,16 +35,7 @@ def yolo_loss(pred, target):
     B, gh, gw, _ = pred.shape
     device = pred.device
 
-    # ── 1. Prepare grid coordinates ──
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(gh, device=device, dtype=torch.float32),
-        torch.arange(gw, device=device, dtype=torch.float32),
-        indexing='ij'
-    )
-    grid_x = grid_x.unsqueeze(0).unsqueeze(-1)   # [1, gh, gw, 1]
-    grid_y = grid_y.unsqueeze(0).unsqueeze(-1)   # [1, gh, gw, 1]
-
-    # ── 2. Decode predictions ──
+    # ── 1. Decode predictions ──
     pred_cx = pred[..., 0] # normalized offset [0,1] within cell
     pred_cy = pred[..., 1] # normalized offset [0,1] within cell
     pred_w  = pred[..., 2] # normalized width [0,1] relative to cell
@@ -58,11 +49,11 @@ def yolo_loss(pred, target):
     pred_obj   = pred_obj.view(B, -1)                                     # [B, num_cells]
     pred_cls   = pred_cls.view(B, -1)                                     # [B, num_cells]
 
-    # ── 3. Find responsible grid cell (cell containing GT center) ──
+    # ── 2. Find responsible grid cell (cell containing GT center) ──
     cell_x = (target[:, 0] * gw).floor().long().clamp(0, gw - 1)   # grid column index [0, gw-1] [B]
     cell_y = (target[:, 1] * gh).floor().long().clamp(0, gh - 1)   # grid row index [0, gh-1] [B]
 
-    # ── 4. Prepare target (from image to grid) ──
+    # ── 3. Prepare target (from image to grid) ──
     gt_cx = target[:, 0] * gw  - cell_x
     gt_cy = target[:, 1] * gh  - cell_y
     gt_w = target[:, 2] * gw    
@@ -82,7 +73,7 @@ def yolo_loss(pred, target):
     target_obj[batch_idx, flat_idx] = 1.0
     target_cls[batch_idx, flat_idx] = 1.0  # class = 1 (object present)
 
-    # ── 5. Compute losses ──
+    # ── 4. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
     box_mask = target_obj > 0.5
     box_loss = 0.0
@@ -149,7 +140,7 @@ def yolo_loss(pred, target):
     cls_loss = nn.BCELoss()(pred_cls, target_cls)
 
     # Total loss (average per sample in the batch)
-    total_loss = 30.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
+    total_loss = 100.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss
 
@@ -191,7 +182,6 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
 
     epoch_avg_loss = total_loss / num_batches
     return epoch_avg_loss, total_box / num_batches, total_obj / num_batches, total_cls / num_batches
-
 
 ##################### Validate #####################
 def validate(model, loader, criterion, device):
@@ -242,8 +232,8 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
-        f.write(f"Notes: Notes: total_loss = 30 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
-        f.write(f"Notes: patience 60 + max epochs 500 (keep it high for convergence)\n")
+        f.write(f"Notes: Notes: total_loss = 100 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
+        f.write(f"Notes: patience 100 + max epochs 500 (keep it high for convergence)\n")
         f.write(f"longer training: min_delta_pct 0.00005 (0.005%)\n")
         f.write(f"increase weight decay to 6e-5\n")
         f.write(f"Results: .....\n")
@@ -280,7 +270,7 @@ def main(args):
     criterion = yolo_loss
 
     # Early stopping
-    patience = 60
+    patience = 100
     min_delta_pct = 0.00005
     best_val_loss = float('inf')
     epochs_no_improve = 0
