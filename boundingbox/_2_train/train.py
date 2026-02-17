@@ -134,15 +134,21 @@ def yolo_loss(pred, target):
         box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
 
     # Objectness loss — BCE everywhere
-    obj_loss = nn.BCELoss()(pred_obj, target_obj)
+    obj_loss = focal_loss(pred_obj, target_obj, gamma=2.0, alpha=0.25)
 
     # Class loss — BCE on responsible cells (or everywhere if you want)
-    cls_loss = nn.BCELoss()(pred_cls, target_cls)
+    cls_loss = focal_loss(pred_cls, target_cls, gamma=2.0, alpha=0.75)
 
     # Total loss (average per sample in the batch)
-    total_loss = 100.0 * box_loss + 1.0 * obj_loss + 0.5 * cls_loss
+    total_loss = 10.0 * box_loss + 10.0 * obj_loss + 10.0 * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss
+
+##################### Focal Loss #####################
+def focal_loss(inputs, targets, gamma=2.0, alpha=0.25):
+    bce = nn.BCELoss(reduction='none')(inputs, targets)
+    pt = torch.exp(-bce)
+    return (alpha * (1 - pt) ** gamma * bce).mean()
 
 ##################### Train one epoch #####################
 def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
@@ -232,10 +238,9 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
-        f.write(f"Notes: Notes: total_loss = 100 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)\n")
-        f.write(f"Notes: patience 100 + max epochs 500 (keep it high for convergence)\n")
-        f.write(f"longer training: min_delta_pct 0.00005 (0.005%)\n")
-        f.write(f"increase weight decay to 6e-5\n")
+        f.write(f"Notes: Retraining with changes for giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
+        f.write(f"Notes: Notes: total_loss = 10 * box_loss (CIoU) + 10* p_obj_loss (Focal Loss) + 10 * p_class_loss (Focal Loss)\n")
+        f.write(f"Notes: copied rest from run 5 (best)\n")
         f.write(f"Results: .....\n")
 
         

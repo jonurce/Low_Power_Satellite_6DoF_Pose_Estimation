@@ -54,6 +54,10 @@ def postprocess(pred, conf_thresh=0.1, iou_thresh=0.6):
     # Filter by confidence
     keep = scores > conf_thresh # [B, num_cells] boolean mask
 
+    print(f"DEBUG: Scores {scores[keep]}")
+    print(f"DEBUG: Object confidences {pred[..., 4][keep]}")
+    print(f"DEBUG: Class probabilities {pred[..., 5][keep]}")
+
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
 
@@ -247,7 +251,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
-    parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/5/best_model.pth", help="Path to trained model (.pth)")
+    parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/8/best_model.pth", help="Path to trained model (.pth)")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
     parser.add_argument("--sequence", type=str, default="1", help="Sequence for real data")
