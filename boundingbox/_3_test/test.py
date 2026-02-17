@@ -15,7 +15,7 @@ from boundingbox._2_train.model import EventBBNet
 import argparse
 
 ##################### Postprocess #####################
-def postprocess(pred, conf_thresh=0.1, iou_thresh=0.6):
+def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
     """
     Simple NMS + filtering for single-class YOLO output.
     pred: [B, gh, gw, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf, class_prob
@@ -54,9 +54,14 @@ def postprocess(pred, conf_thresh=0.1, iou_thresh=0.6):
     # Filter by confidence
     keep = scores > conf_thresh # [B, num_cells] boolean mask
 
-    print(f"DEBUG: Scores {scores[keep]}")
-    print(f"DEBUG: Object confidences {pred[..., 4][keep]}")
-    print(f"DEBUG: Class probabilities {pred[..., 5][keep]}")
+    # print(f"DEBUG: Scores max: {scores.max().item():.4f}")
+    # print(f"DEBUG: Obj_conf max: {pred[..., 4].max().item():.4f}")
+    # print(f"DEBUG: Class_prob max: {pred[..., 5].max().item():.4f}")
+    # print("\n")
+    # print(f"DEBUG: Scores > {conf_thresh}: {scores[keep]}")
+    # print(f"DEBUG: Obj_conf > {conf_thresh}: {pred[..., 4][keep]}")
+    # print(f"DEBUG: Class_prob > {conf_thresh}: {pred[..., 5][keep]}")
+    # print("\n")
 
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
@@ -107,6 +112,8 @@ def postprocess(pred, conf_thresh=0.1, iou_thresh=0.6):
         final_scores_list.append(final_scores_b.cpu().numpy())
 
 
+    print(f"DEBUG: Final boxes list: {final_boxes_list}")
+    print(f"DEBUG: Final scores list: {final_scores_list}")
     # List of [x1,y1,x2,y2] normalized [0,1] relative to image + list of confidence scores
     return final_boxes_list, final_scores_list
 
@@ -150,7 +157,8 @@ def main(args):
 
     # Load model (from parallel trained to single GPU inference)
     model = EventBBNet().to(device)
-    checkpoint = torch.load(args.model_path, map_location=device)
+    model_path = os.path.join(args.model_path, args.model_name, "best_model.pth")
+    checkpoint = torch.load(model_path, map_location=device)
     state_dict = {k.replace("module.", ""): v for k, v in checkpoint.items()}
     model.load_state_dict(state_dict)
     # model.load_state_dict(checkpoint)
@@ -236,10 +244,11 @@ def main(args):
     energy_per_sample_mj = avg_power_w * avg_latency  # mJ per sample
 
     # Save results
-    if not os.path.exists(args.save_dir):
-            os.makedirs(args.save_dir, exist_ok=True)
-    with open(os.path.join(args.save_dir, f"{args.satellite}_{args.sequence}_{args.distance}_results.txt"), "w") as f:
-        f.write(f"Evaluated Model: {args.model_path}\n")
+    save_dir = os.path.join(args.save_dir, args.model_name)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, f"{args.satellite}_{args.sequence}_{args.distance}.txt"), "w") as f:
+        f.write(f"Evaluated Model: {args.model_path}/{args.model_name}/best_model.pth\n")
         f.write(f"Test Dataset: {args.satellite}_{args.sequence}_{args.distance} \n")
         f.write(f"Samples evaluated: {num_samples}\n")
         f.write(f"\n")
@@ -251,7 +260,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
-    parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/8/best_model.pth", help="Path to trained model (.pth)")
+    parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/", help="Path to model folder")
+    parser.add_argument("--model_name", type=str, default="8", help="Model name (subfolder in runs)")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
     parser.add_argument("--sequence", type=str, default="1", help="Sequence for real data")

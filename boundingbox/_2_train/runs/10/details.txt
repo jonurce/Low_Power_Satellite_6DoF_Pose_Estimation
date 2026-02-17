@@ -11,5 +11,7 @@ Notes:           Single-class (satellite), event-only input
 Notes: Retraining with changes for giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
 Notes: Notes: total_loss = 10 * box_loss (CIoU) + 10* p_obj_loss (Focal Loss) + 10 * p_class_loss (Focal Loss)
 Notes: Added bias in model for obj_conf & class_prob → start with higher logit (~0.5–0.9 prob)
+Notes: target prob_obj and prob_class values to 1 inside the cells which center falls inside the target bbox
 Notes: copied rest from run 5 (best)
+Notes: obj_conf & class_prob losses to 1 inside target bbox
 Results: .....

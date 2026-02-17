@@ -57,28 +57,106 @@ def yolo_loss(pred, target):
     gt_cx = target[:, 0] * gw  - cell_x
     gt_cy = target[:, 1] * gh  - cell_y
     gt_w = target[:, 2] * gw    
-    gt_h = target[:, 3] * gh    
+    gt_h = target[:, 3] * gh   
 
     # Create target boxes (broadcast to all cells, but loss only on responsible)
     target_boxes = torch.stack([gt_cx, gt_cy, gt_w, gt_h], dim=1).unsqueeze(1)  # [B, 1, 4]
     target_boxes = target_boxes.expand(-1, gh*gw, -1)                           # [B, num_cells, 4]
 
+    # ── 4. Prepare target (target_obj and target_cls) ──
+
     # Create target tensors [B, gh*gw]
     target_obj = torch.zeros(B, gh*gw, device=device)   # 1 only for responsible cell
     target_cls = torch.zeros(B, gh*gw, device=device)   # 1 for correct class
 
-    # Set responsible cells
-    batch_idx = torch.arange(B, device=device)
-    flat_idx = cell_y * gw + cell_x
-    target_obj[batch_idx, flat_idx] = 1.0
-    target_cls[batch_idx, flat_idx] = 1.0  # class = 1 (object present)
+    # Grid cell centers in relative image coords
+    grid_x_centers = torch.arange(gw, device=device, dtype=torch.float32) + 0.5  # [gw]
+    grid_y_centers = torch.arange(gh, device=device, dtype=torch.float32) + 0.5  # [gh]
 
-    # ── 4. Compute losses ──
+    # Expand to [B, gh, gw]
+    grid_x_centers = grid_x_centers[None, None, :]  # [1, 1, gw]
+    grid_y_centers = grid_y_centers[None, :, None]  # [1, gh, 1]
+
+    # - 4.1 - Only 1 responsible cell (the one containing GT center)
+    # Set responsible cells
+    # batch_idx = torch.arange(B, device=device)
+    # flat_idx = cell_y * gw + cell_x
+    # target_obj[batch_idx, flat_idx] = 1.0
+    # target_cls[batch_idx, flat_idx] = 1.0  # class = 1 (object present)
+
+    # - 4.2 - Set all cells that overlap GT box as responsible (all to 1)
+
+    # GT box corners in relative image coords
+    # gt_x1 = (target[:, 0] - target[:, 2]/2) * gw   # left edge
+    # gt_y1 = (target[:, 1] - target[:, 3]/2) * gh   # top edge
+    # gt_x2 = (target[:, 0] + target[:, 2]/2) * gw   # right edge
+    # gt_y2 = (target[:, 1] + target[:, 3]/2) * gh   # bottom edge 
+
+    # Check which cells overlap GT box (center inside box)
+    # inside_x = (grid_x_centers >= gt_x1[:, None, None]) & (grid_x_centers <= gt_x2[:, None, None])
+    # inside_y = (grid_y_centers >= gt_y1[:, None, None]) & (grid_y_centers <= gt_y2[:, None, None])
+    # inside = inside_x & inside_y  # [B, gh, gw] boolean
+
+    # Flatten and set 1.0 for overlapping cells
+    # flat_inside = inside.view(B, -1)  # [B, num_cells]
+    # target_obj[flat_inside] = 1.0 # [B, num_cells]
+    # target_cls[flat_inside] = 1.0 # [B, num_cells]
+
+    # - 4.3 - Set all cells that overlap GT box as responsible (gradual with distance to GT center)
+
+    # GT center in relative image coords
+    gt_center_x = target[:, 0] * gw  # [B]
+    gt_center_y = target[:, 1] * gh  # [B]
+
+    # Half-size of GT box in grid units
+    half_w = target[:, 2] * gw / 2  # [B]
+    half_h = target[:, 3] * gh / 2  # [B]
+
+    # Distance from GT center to each cell center (L2 distance in relative image coords)
+    dx = grid_x_centers - gt_center_x[:, None, None]      # [B, gh, gw]
+    dy = grid_y_centers - gt_center_y[:, None, None]      # [B, gh, gw]
+    distance = torch.sqrt(dx**2 + dy**2)                  # [B, gh, gw]
+
+    # Gaussian weight: 1.0 at center, falls off quickly
+    sigma = 0.7  # smaller sigma = sharper peak, larger = broader
+    gaussian_weight = torch.exp(-distance**2 / (2 * sigma**2))  # [B, gh, gw]
+
+    # Scale down toward box edges (linear falloff from center to edge)
+    # Distance to box edge (approximate Manhattan distance to nearest edge)
+    edge_dist_x = torch.abs(torch.abs(dx) - torch.abs(half_w[:, None, None]))
+    edge_dist_y = torch.abs(torch.abs(dy) - torch.abs(half_h[:, None, None]))
+    max_edge_dist_x = torch.abs(half_w[:, None, None]) # [B, gh, gw]
+    max_edge_dist_y = torch.abs(half_h[:, None, None]) # [B, gh, gw]
+
+    # [B, gh, gw], normalized to [0,1] where 0 at center, 1 at farthest edge
+    edge_dist = torch.min(edge_dist_x/max_edge_dist_x, edge_dist_y/max_edge_dist_y) 
+
+    # [B, gh, gw] Switch to 1 at center, 0 at farthest edge
+    edge_falloff = 1.0 - edge_dist  
+
+    # Final soft target: Gaussian peak × edge falloff
+    soft_target = gaussian_weight * edge_falloff  # [B, gh, gw]
+
+    # Flatten and assign
+    flat_soft = soft_target.view(B, -1)  # [B, num_cells]
+    target_obj = flat_soft # [B, num_cells]
+    target_cls = flat_soft  # same for class (single-class) [B, num_cells]
+
+    # Optional: force 1.0 exactly at center cell (strongest supervision)
+    center_idx = cell_y * gw + cell_x
+    batch_idx = torch.arange(B, device=device)
+    target_obj[batch_idx, center_idx] = 1.0
+    target_cls[batch_idx, center_idx] = 1.0
+
+
+    
+
+    # ── 5. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
     box_mask = target_obj > 0.5
     box_loss = 0.0
 
-    # Option 1: MSE on box parameters (simple but less effective)
+    # - 5.1 - MSE on box parameters (simple but less effective)
     # Box loss is measured in [0,1] normalized grid units
     # box_loss of 1: entire cell off (720x800 image → 22.5x25 pixels)
     # Aim for box_loss ~< 0.2 (4.5x5 pixels)
@@ -87,7 +165,7 @@ def yolo_loss(pred, target):
     #     box_loss = box_loss.mean(dim=-1)                # [B, num_cells]
     #     box_loss = (box_loss * box_mask.float()).sum() / box_mask.sum().clamp(min=1)
 
-    # Option 2: CIoU loss (more complex but better convergence)
+    # - 5.2 - CIoU loss (more complex but better convergence)
     # CIoU is in [0,1] (higher is better, 1 is perfect overlap)
     # Box loss is 1 - CIoU, so 0 is perfect, 1 is no overlap very bad
     # Aim for box_loss ~< 0.2
@@ -240,7 +318,9 @@ def main(args):
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
         f.write(f"Notes: Retraining with changes for giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
         f.write(f"Notes: Notes: total_loss = 10 * box_loss (CIoU) + 10* p_obj_loss (Focal Loss) + 10 * p_class_loss (Focal Loss)\n")
+        f.write(f"Notes: Notes: Added bias in model for obj_conf & class_prob → start with higher logit (~0.5–0.9 prob)\n")
         f.write(f"Notes: copied rest from run 5 (best)\n")
+        f.write(f"Notes: obj_conf & class_prob losses with gradual distance to bbox center/edges\n")
         f.write(f"Results: .....\n")
 
         
@@ -316,6 +396,9 @@ def main(args):
 
         if epoch % 5 == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, f"checkpoint_epoch_{epoch}.pth"))
+            prev_path = os.path.join(model_dir, f"checkpoint_epoch_{epoch - 5}.pth")
+            if os.path.exists(prev_path):
+                os.remove(prev_path)
 
     writer.close()
 
