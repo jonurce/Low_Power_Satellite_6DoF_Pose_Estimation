@@ -6,6 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import os
 from torch.utils.data import DataLoader
+from torchvision.ops import nms
 
 from boundingbox._1_dataset.dataset import SatelliteBBDataset
 from boundingbox._2_train import model
@@ -14,7 +15,7 @@ from boundingbox._2_train.model import EventBBNet
 import argparse
 
 ##################### Postprocess #####################
-def postprocess(pred, conf_thresh=0.25, iou_thresh=0.5):
+def postprocess(pred, conf_thresh=0.1, iou_thresh=0.6):
     """
     Simple NMS + filtering for single-class YOLO output.
     pred: [B, gh, gw, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf, class_prob
@@ -24,7 +25,7 @@ def postprocess(pred, conf_thresh=0.25, iou_thresh=0.5):
     device = pred.device
 
     # Sigmoid on conf and class
-    pred[..., 4:] = torch.sigmoid(pred[..., 4:])
+    # pred[..., 4:] = torch.sigmoid(pred[..., 4:])
 
     # grid_x, grid_y: [gh, gw] with values 0,1,...,gw-1 and 0,1,...,gh-1
     grid_y, grid_x = torch.meshgrid(
@@ -38,56 +39,61 @@ def postprocess(pred, conf_thresh=0.25, iou_thresh=0.5):
     grid_y = grid_y[None, :, :]   
 
     # Decode cx, cy, w, h to normalized [0,1] relative to image
-    pred[..., 0] = (torch.sigmoid(pred[..., 0]) + grid_x) / gw 
-    pred[..., 1] = (torch.sigmoid(pred[..., 1]) + grid_y) / gh  
-    pred[..., 2] = torch.exp(pred[..., 2]) / gw 
-    pred[..., 3] = torch.exp(pred[..., 3]) / gh 
+    pred[..., 0] = (pred[..., 0] + grid_x) / gw 
+    pred[..., 1] = (pred[..., 1] + grid_y) / gh  
+    pred[..., 2] = pred[..., 2] / gw 
+    pred[..., 3] = pred[..., 3] / gh 
 
     # Flatten to [B, num_cells, 6] where num_cells = gh*gw
     pred = pred.view(B, -1, 6)
 
     # Extract boxes and scores
-    boxes = pred[..., :4]  # [B, num_cells, 4] cx,cy,w,h absolute [0,1]
+    boxes = pred[..., :4]  # [B, num_cells, 4] cx, cy, w, h normalized [0,1] relative to image
     scores = pred[..., 4] * pred[..., 5]  # obj_conf * class_prob [B, num_cells]
 
     # Filter by confidence
     keep = scores > conf_thresh # [B, num_cells] boolean mask
+
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
 
     for b in range(B):
         keep_b = keep[b]  # [num_cells]
         if not keep_b.any():
-            final_boxes_list.append(np.empty((0, 4)))
-            final_scores_list.append(np.empty(0))
             continue
 
-        boxes_b = boxes[b][keep_b]      # [N, 4]
-        scores_b = scores[b][keep_b]    # [N]
+        boxes_b = boxes[b][keep_b]      # [num_cells, 4]
+        scores_b = scores[b][keep_b]    # [num_cells]
 
-        # Convert to [x1,y1,x2,y2]
+        # Convert to [x1,y1,x2,y2] normalized [0,1] relative to image
         x1 = boxes_b[:, 0] - boxes_b[:, 2] / 2
         y1 = boxes_b[:, 1] - boxes_b[:, 3] / 2
         x2 = boxes_b[:, 0] + boxes_b[:, 2] / 2
         y2 = boxes_b[:, 1] + boxes_b[:, 3] / 2
 
-        # [N, 4] x1,y1,x2,y2 normalized [0,1] relative to image
+        # [num_cells, 4] x1,y1,x2,y2 normalized [0,1] relative to image
         boxes_xyxy = torch.stack([x1, y1, x2, y2], dim=1)
 
         # Greedy Non Maximum Suppression NMS NMS (single-class)
-        keep_idx = []
-        while scores_b.numel() > 0:
-            max_idx = scores_b.argmax()
-            keep_idx.append(max_idx.item())
+        # keep_idx = []
+        # while scores_b.numel() > 0:
+        #     max_idx = scores_b.argmax()
+        #     keep_idx.append(max_idx.item())
 
-            if scores_b.numel() == 1:
-                break
+        #     if scores_b.numel() == 1:
+        #         break
 
-            # Compute IoU of the best box with the rest: [1, 4] vs [N, 4]
-            iou = compute_iou(boxes_xyxy[max_idx:max_idx+1], boxes_xyxy)  # [1, N]
-            keep = iou.squeeze(0) < iou_thresh
-            boxes_xyxy = boxes_xyxy[keep]
-            scores_b = scores_b[keep]
+            # Compute IoU of the best box with the rest: [1, 4] vs [num_cells, 4]
+        #     iou = compute_iou(boxes_xyxy[max_idx:max_idx+1], boxes_xyxy)  # [1, num_cells]
+
+            # Keep boxes with IoU < thresh (exclude self by >= thresh or slice)
+        #     keep = iou.squeeze(0) < iou_thresh
+        #     keep[max_idx] = False
+
+        #     boxes_xyxy = boxes_xyxy[keep]
+        #     scores_b = scores_b[keep]
+
+        keep_idx = nms(boxes_xyxy, scores_b, iou_threshold=iou_thresh)
 
         # Collect final boxes & scores for this image
         final_boxes_b = boxes_xyxy[torch.tensor(keep_idx, device=device)]
@@ -149,7 +155,8 @@ def main(args):
     # Test dataset
     test_ds = SatelliteBBDataset(split='test', satellite=args.satellite,
                                  sequence=args.sequence, distance=args.distance)
-    test_loader = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=0)
+    # test_ds.labels["annotations"] = test_ds.labels["annotations"][:10]  # only first 10 samples
+    test_loader = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=False)
 
     total_iou = 0.0
     num_samples = 0
@@ -172,7 +179,7 @@ def main(args):
             pred = model(event) 
 
             # Postprocess → list of [x1, y1, x2, y2, conf]
-            final_boxes, final_scores = postprocess(pred, conf_thresh=0.25, iou_thresh=0.5)
+            final_boxes, final_scores = postprocess(pred)
 
             # End timing (inference + postprocess)
             latency = time.time() - start_time
@@ -185,8 +192,10 @@ def main(args):
             avg_power = (power_start + power_end) / 2
             power_readings.append(avg_power)
 
-            # Get GT (assuming single GT bbox per image)
-            gt_bbox = bbox.numpy()[0]  # [cx, cy, w, h] normalized [0,1] relative to image
+            # GT [cx, cy, w, h] normalized [0,1] relative to image (assuming single GT bbox per image)
+            gt_bbox = bbox.numpy()[0]  
+
+            # GT [x1, y1, x2, y2] normalized [0,1] relative to image
             gt_xyxy = np.array([
                 gt_bbox[0] - gt_bbox[2]/2,
                 gt_bbox[1] - gt_bbox[3]/2,
@@ -196,8 +205,20 @@ def main(args):
 
             # Compute IoU
             if len(final_boxes) > 0:
-                # [1, 4] vs [1, 4] -> IoU scalar [1, 1]
-                iou = compute_iou(torch.tensor(final_boxes[:,:4]), torch.tensor([gt_xyxy])).max().item()
+            
+                # final_boxes[0] is the array for the only image [N, 4]
+                pred_boxes_np = final_boxes[0]  # [N, 4]
+                pred_scores_np = final_scores[0]  # [N]
+                
+                if len(pred_boxes_np) == 0:
+                    iou = 0.0
+                else:
+                    # Pick highest score box
+                    best_idx = np.argmax(pred_scores_np)
+                    pred_xyxy = pred_boxes_np[best_idx]  # [x1,y1,x2,y2]
+
+                    # [1, 4] vs [1, 4] -> IoU scalar [1, 1]
+                    iou = compute_iou(torch.tensor([pred_xyxy]), torch.tensor([gt_xyxy])).max().item()
             else:
                 iou = 0.0
 
@@ -211,9 +232,13 @@ def main(args):
     energy_per_sample_mj = avg_power_w * avg_latency  # mJ per sample
 
     # Save results
-    with open(os.path.join(args.save_dir, "test_results.txt"), "w") as f:
-        f.write(f"Test Results for {args.satellite}_{args.sequence}_{args.distance} \n")
+    if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir, exist_ok=True)
+    with open(os.path.join(args.save_dir, f"{args.satellite}_{args.sequence}_{args.distance}_results.txt"), "w") as f:
+        f.write(f"Evaluated Model: {args.model_path}\n")
+        f.write(f"Test Dataset: {args.satellite}_{args.sequence}_{args.distance} \n")
         f.write(f"Samples evaluated: {num_samples}\n")
+        f.write(f"\n")
         f.write(f"Mean IoU: {avg_iou:.4f}\n")
         f.write(f"Avg Latency: {avg_latency:.2f} ms\n")
         f.write(f"Avg FPS: {fps:.2f}\n")
