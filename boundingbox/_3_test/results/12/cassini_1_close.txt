@@ -3,7 +3,10 @@ Test Dataset: cassini_1_close
 Samples evaluated: 277
 
 Mean IoU: 0.0000
-Avg Latency: 19.38 ms
-Avg FPS: 51.60
-Avg Power: 99.5 W
-Estimated energy per sample: 1928.4 mJ
+Avg Latency: 19.60 ms
+Avg FPS: 51.02
+Avg Power: 115.1 W
+Estimated energy per sample: 2255.7 mJ
+
+Avg max obj_conf: 0.2577
+Avg max class_prob: 0.2423

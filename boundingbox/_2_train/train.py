@@ -124,7 +124,7 @@ def yolo_loss(pred, target):
     distance = torch.sqrt(dx**2 + dy**2)                  # [B, gh, gw]
 
     # Gaussian weight: 1.0 at center, falls off with distance
-    sigma = 1.6  # smaller sigma = sharper peak, larger = broader
+    sigma = 3  # smaller sigma = sharper peak, larger = broader
     gaussian_weight = torch.exp(-distance**2 / (2 * sigma**2))  # [B, gh, gw]
 
     # Scale down toward box edges (linear falloff from center to edge)
@@ -217,24 +217,24 @@ def yolo_loss(pred, target):
 
     # - 4.3 - Focal loss on objectness confidence
     # far_mask = distance > 4.0  # [B, gh, gw]
-    obj_loss = focal_loss(pred_obj, target_obj, gamma=4.0, alpha=0.25)
+    obj_loss = focal_loss(pred_obj, target_obj, gamma=5.0, alpha=0.25)
     # obj_loss[far_mask] = 0.0   # ignore very distant negatives
     # obj_loss = obj_loss.mean() * remove mean from focal_loss and apply after cls_loss
 
     # - 4.4 - Focal loss on class probability (same target as objectness for single-class)
-    cls_loss = focal_loss(pred_cls, target_cls, gamma=2.0, alpha=0.75)
+    cls_loss = focal_loss(pred_cls, target_cls, gamma=5.0, alpha=0.25)
 
 
 
     # ── 5. Compute final loss: weight each component ──
 
     # Total loss (average per sample in the batch)
-    total_loss = 10.0 * box_loss + 150.0 * obj_loss + 60.0 * cls_loss
+    total_loss = 10.0 * box_loss + 300.0 * obj_loss + 100.0 * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss
 
 ##################### Focal Loss #####################
-def focal_loss(inputs, targets, gamma=2.0, alpha=0.25):
+def focal_loss(inputs, targets, gamma, alpha):
     bce = nn.BCELoss(reduction='none')(inputs, targets)
     pt = torch.exp(-bce)
     return (alpha * (1 - pt) ** gamma * bce).mean()
@@ -327,11 +327,10 @@ def main(args):
         f.write(f"Learning rate:   {args.lr}\n")
         f.write(f"Device:          x2 GPUs\n")
         f.write(f"Notes:           Single-class (satellite), event-only input\n")
-        f.write(f"Notes: Retraining with changes for giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
-        f.write(f"Notes: Notes: total_loss = 10 * box_loss (CIoU) + 10* p_obj_loss (Focal Loss) + 10 * p_class_loss (Focal Loss)\n")
-        f.write(f"Notes: Notes: Added bias in model for obj_conf & class_prob → start with higher logit (~0.5–0.9 prob)\n")
-        f.write(f"Notes: copied rest from run 5 (best)\n")
-        f.write(f"Notes: obj_conf & class_prob losses with gradual distance to bbox center/edges\n")
+        f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
+        f.write(f"Notes: weight_obj_loss = 300 (Focal Loss: gamma=5.0, alpha=0.25) \n")
+        f.write(f"Notes: weight_class_loss = 100 (Focal Loss: gamma=5.0, alpha=0.25)\n")
+        f.write(f"Notes: increase sigma to 3 \n")
         f.write(f"Results: .....\n")
 
         

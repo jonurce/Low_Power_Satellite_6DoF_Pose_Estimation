@@ -54,15 +54,6 @@ def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
     # Filter by confidence
     keep = scores > conf_thresh # [B, num_cells] boolean mask
 
-    print(f"DEBUG: Scores max: {scores.max().item():.4f}")
-    print(f"DEBUG: Obj_conf max: {pred[..., 4].max().item():.4f}")
-    print(f"DEBUG: Class_prob max: {pred[..., 5].max().item():.4f}")
-    print("\n")
-    print(f"DEBUG: Scores > {conf_thresh}: {scores[keep]}")
-    print(f"DEBUG: Obj_conf > {conf_thresh}: {pred[..., 4][keep]}")
-    print(f"DEBUG: Class_prob > {conf_thresh}: {pred[..., 5][keep]}")
-    print("\n")
-
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
 
@@ -112,8 +103,9 @@ def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
         final_scores_list.append(final_scores_b.cpu().numpy())
 
 
-    print(f"DEBUG: Final boxes list: {final_boxes_list}")
-    print(f"DEBUG: Final scores list: {final_scores_list}")
+    # print(f"DEBUG: Final boxes list: {final_boxes_list}")
+    # print(f"DEBUG: Final scores list: {final_scores_list}")
+
     # List of [x1,y1,x2,y2] normalized [0,1] relative to image + list of confidence scores
     return final_boxes_list, final_scores_list
 
@@ -152,6 +144,7 @@ def compute_iou(box1, box2):
 
 ##################### Main #####################
 def main(args):
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -174,6 +167,10 @@ def main(args):
     num_samples = 0
     latencies = []
     power_readings = []
+
+    pro_obj_max = 0.0
+    prob_class_max = 0.0
+    n_samples = 0
 
     with torch.no_grad():
         for rgb, event, bbox in tqdm(test_loader, desc="Testing"):
@@ -203,6 +200,11 @@ def main(args):
             ).decode().strip().split('\n')[0])
             avg_power = (power_start + power_end) / 2
             power_readings.append(avg_power)
+
+            # print(f"DEBUG: Obj_conf max: {pred[..., 4].max().item():.4f}")
+            # print(f"DEBUG: Class_prob max: {pred[..., 5].max().item():.4f}")
+            pro_obj_max += pred[..., 4].max().item()
+            prob_class_max += pred[..., 5].max().item()
 
             # GT [cx, cy, w, h] normalized [0,1] relative to image (assuming single GT bbox per image)
             gt_bbox = bbox.numpy()[0]  
@@ -243,6 +245,9 @@ def main(args):
     avg_power_w = np.mean(power_readings)
     energy_per_sample_mj = avg_power_w * avg_latency  # mJ per sample
 
+    avg_max_obj = pro_obj_max / num_samples
+    avg_max_class = prob_class_max / num_samples
+
     # Save results
     save_dir = os.path.join(args.save_dir, args.model_name)
     if not os.path.exists(save_dir):
@@ -257,8 +262,15 @@ def main(args):
         f.write(f"Avg FPS: {fps:.2f}\n")
         f.write(f"Avg Power: {avg_power_w:.1f} W\n")
         f.write(f"Estimated energy per sample: {energy_per_sample_mj:.1f} mJ\n")
+        f.write(f"\n")
+        f.write(f"Avg max obj_conf: {avg_max_obj:.4f}\n")
+        f.write(f"Avg max class_prob: {avg_max_class:.4f}\n")
+
+
 
 if __name__ == "__main__":
+    
+
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/", help="Path to model folder")
     parser.add_argument("--model_name", type=str, default="13", help="Model name (subfolder in runs)")
