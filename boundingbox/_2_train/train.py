@@ -1,7 +1,7 @@
 # train.py
 import datetime
 import sys
-from scipy import signal
+import signal
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -23,6 +23,17 @@ warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
 
 import os
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
+
+# Global variables to access last known values (update them in loop)
+global_last_epoch = 0
+global_best_val_loss = float('inf')
+global_last_val_loss = float('inf')
+global_last_train_box = 0.0
+global_last_val_box = 0.0
+global_last_model_state = None
+global_model_dir = None
+
+
 
 ##################### YOLO-style loss (simplified for single-class) #####################
 def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj, alpha_cls, sigma):
@@ -311,29 +322,19 @@ def validate(model, loader, criterion, device):
     n = len(loader)
     return total_loss / n, total_box / n, total_obj / n, total_cls / n
 
-
-# Global variables to access last known values (update them in loop)
-global_last_epoch = 0
-global_best_val_loss = float('inf')
-global_last_val_loss = float('inf')
-global_last_train_box = 0.0
-global_last_val_box = 0.0
-global_last_model_state = None
-
-
 ##################### Save on Interrupt #####################
-def save_on_interrupt(model_dir):
+def save_on_interrupt(signal_received, frame):
     print("\nInterrupt received — saving final results...")
 
     # Save model state_dict
     if global_last_model_state is not None:
-        interrupt_path = os.path.join(model_dir, f"interrupted_epoch_{global_last_epoch}.pth")
+        interrupt_path = os.path.join(global_model_dir, f"interrupted_epoch_{global_last_epoch}.pth")
         torch.save(global_last_model_state, interrupt_path)
         print(f"Saved interrupted model: {interrupt_path}")
     else:
         print("No model state to save (interrupted before first epoch)")
     
-    with open(os.path.join(model_dir, "details.txt"), "a") as f:
+    with open(os.path.join(global_model_dir, "details.txt"), "a") as f:
         f.write(f"-------------------------\n")
         f.write(f"Results (interrupted):\n")
         f.write(f"Final epoch: {global_last_epoch}\n")
@@ -354,14 +355,14 @@ def main(args):
     counter = args.start_count
     while True:
         model_subdir = f"{counter}"
-        model_dir = os.path.join(args.save_dir, model_subdir)
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir, exist_ok=True)
+        global_model_dir = os.path.join(args.save_dir, model_subdir)
+        if not os.path.exists(global_model_dir):
+            os.makedirs(global_model_dir, exist_ok=True)
             break
         counter += 1
 
     # Save run details
-    details_path = os.path.join(model_dir, "details.txt")
+    details_path = os.path.join(global_model_dir, "details.txt")
     with open(details_path, "w") as f:
         f.write(f"Bounding Box Training Run\n")
         f.write(f"Single-class (satellite), event-only input\n")
@@ -382,7 +383,7 @@ def main(args):
         
 
     # Register handler
-    signal.signal(signal.SIGINT, save_on_interrupt(model_dir))
+    signal.signal(signal.SIGINT, save_on_interrupt)
 
     
     # Datasets & Loaders
@@ -398,7 +399,7 @@ def main(args):
     model = EventBBNet().to(device)
 
     # TensorBoard
-    writer = SummaryWriter(log_dir=model_dir)
+    writer = SummaryWriter(log_dir=global_model_dir)
 
     # Log model graph
     dummy_event = torch.randn(1, 1, 720, 800).to(device)
@@ -452,7 +453,7 @@ def main(args):
             best_val_loss = val_loss
             global_best_val_loss = best_val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pth"))
+            torch.save(model.state_dict(), os.path.join(global_model_dir, "best_model.pth"))
             print(f"→ Improved! Saved best model (val_loss: {val_loss:.6f})")
         else:
             epochs_no_improve += 1
@@ -463,8 +464,8 @@ def main(args):
                 break
 
         if epoch % 5 == 0:
-            torch.save(model.state_dict(), os.path.join(model_dir, f"checkpoint_epoch_{epoch}.pth"))
-            prev_path = os.path.join(model_dir, f"checkpoint_epoch_{epoch - 5}.pth")
+            torch.save(model.state_dict(), os.path.join(global_model_dir, f"checkpoint_epoch_{epoch}.pth"))
+            prev_path = os.path.join(global_model_dir, f"checkpoint_epoch_{epoch - 5}.pth")
             if os.path.exists(prev_path):
                 os.remove(prev_path)
 

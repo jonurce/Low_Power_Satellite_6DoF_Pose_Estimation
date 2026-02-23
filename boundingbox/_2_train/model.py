@@ -63,7 +63,7 @@ class EventBBNet(nn.Module):
         )
 
         # Improved backbone with residuals and SPPF
-        self.backbone = nn.Sequential(
+        self.backbone_stages = nn.Sequential(
             # Stage 1: downsample + CSP block
             nn.Conv2d(1, base_channels, 3, stride=2, padding=1, bias=False),  # /2
             nn.BatchNorm2d(base_channels),
@@ -87,16 +87,18 @@ class EventBBNet(nn.Module):
             nn.BatchNorm2d(base_channels*8),
             nn.ReLU(),
             ResidualBlock(base_channels*8),
-            # SPPF: maxpool at different scales + concat
-            nn.Sequential(
-                nn.MaxPool2d(5, stride=1, padding=2),
-                nn.MaxPool2d(9, stride=1, padding=4),
-                nn.MaxPool2d(13, stride=1, padding=6),
-                nn.Conv2d(base_channels*8*4, base_channels*8, 1, bias=False),  # compress
-                nn.BatchNorm2d(base_channels*8),
-                nn.ReLU()
-            ),
+        )
 
+        self.sppf_max5 = nn.MaxPool2d(5, stride=1, padding=2)
+        self.sppf_max9 = nn.MaxPool2d(9, stride=1, padding=4)
+        self.sppf_max13 = nn.MaxPool2d(13, stride=1, padding=6)
+        self.sppf_conv = nn.Sequential(
+            nn.Conv2d(base_channels*8 * 4, base_channels*8, 1, bias=False),
+            nn.BatchNorm2d(base_channels*8),
+            nn.ReLU()
+        )
+
+        self.backbone_final = nn.Sequential(
             # Final stage
             nn.Conv2d(base_channels*8, base_channels*16, 3, stride=2, padding=1, bias=False),  # /32
             nn.BatchNorm2d(base_channels*16),
@@ -124,7 +126,21 @@ class EventBBNet(nn.Module):
 
     def forward(self, event):
         # Feature extraction: [B, C=1, H, W] -> [B, C*16, H/32, W/32]
-        feat = self.backbone(event) 
+        feat = self.backbone_stages(event)  # [B, base*8, H/16, W/16]
+
+        # SPPF parallel branches
+        x1 = feat
+        x2 = self.sppf_max5(feat)
+        x3 = self.sppf_max9(feat)
+        x4 = self.sppf_max13(feat)
+
+        # Concat along channel dim
+        concat = torch.cat([x1, x2, x3, x4], dim=1)  # [B, base*8*4, H/16, W/16]
+
+        # Compress back
+        feat = self.sppf_conv(concat)  # [B, base*8, H/16, W/16]
+
+        feat = self.backbone_final(feat)  # [B, base*16, H/32, W/32]
 
         # Detection head: [B, C*16, H/32, W/32] -> [B, 6, H/32, W/32]
         pred = self.head(feat) 

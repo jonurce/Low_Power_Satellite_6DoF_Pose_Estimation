@@ -18,14 +18,11 @@ import argparse
 def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
     """
     Simple NMS + filtering for single-class YOLO output.
-    pred: [B, gh, gw, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf, class_prob
+    pred: [B, gh, gw, K, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf + class_prob
     Returns list of [x1, y1, x2, y2, conf] per image, normalized [0,1] relative to image
     """
-    B, gh, gw, C = pred.shape
+    B, gh, gw, K, C = pred.shape
     device = pred.device
-
-    # Sigmoid on conf and class
-    # pred[..., 4:] = torch.sigmoid(pred[..., 4:])
 
     # grid_x, grid_y: [gh, gw] with values 0,1,...,gw-1 and 0,1,...,gh-1
     grid_y, grid_x = torch.meshgrid(
@@ -44,26 +41,26 @@ def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
     pred[..., 2] = pred[..., 2] / gw 
     pred[..., 3] = pred[..., 3] / gh 
 
-    # Flatten to [B, num_cells, 6] where num_cells = gh*gw
+    # Flatten to [B, num_cells*K, 6] where num_cells = gh*gw
     pred = pred.view(B, -1, 6)
 
     # Extract boxes and scores
-    boxes = pred[..., :4]  # [B, num_cells, 4] cx, cy, w, h normalized [0,1] relative to image
-    scores = pred[..., 4] * pred[..., 5]  # obj_conf * class_prob [B, num_cells]
+    boxes = pred[..., :4]  # [B, num_cells*K, 4] cx, cy, w, h normalized [0,1] relative to image
+    scores = pred[..., 4] * pred[..., 5]  # obj_conf * class_prob [B, num_cells*K]
 
     # Filter by confidence
-    keep = scores > conf_thresh # [B, num_cells] boolean mask
+    keep = scores > conf_thresh # [B, num_cells*K] boolean mask
 
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
 
     for b in range(B):
-        keep_b = keep[b]  # [num_cells]
+        keep_b = keep[b]  # [num_cells*K]
         if not keep_b.any():
             continue
 
-        boxes_b = boxes[b][keep_b]      # [num_cells, 4]
-        scores_b = scores[b][keep_b]    # [num_cells]
+        boxes_b = boxes[b][keep_b]      # [num_cells*K, 4]
+        scores_b = scores[b][keep_b]    # [num_cells*K]
 
         # Convert to [x1,y1,x2,y2] normalized [0,1] relative to image
         x1 = boxes_b[:, 0] - boxes_b[:, 2] / 2
@@ -71,7 +68,7 @@ def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
         x2 = boxes_b[:, 0] + boxes_b[:, 2] / 2
         y2 = boxes_b[:, 1] + boxes_b[:, 3] / 2
 
-        # [num_cells, 4] x1,y1,x2,y2 normalized [0,1] relative to image
+        # [num_cells*K, 4] x1,y1,x2,y2 normalized [0,1] relative to image
         boxes_xyxy = torch.stack([x1, y1, x2, y2], dim=1)
 
         # Greedy Non Maximum Suppression NMS NMS (single-class)
@@ -101,10 +98,6 @@ def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
 
         final_boxes_list.append(final_boxes_b.cpu().numpy())
         final_scores_list.append(final_scores_b.cpu().numpy())
-
-
-    # print(f"DEBUG: Final boxes list: {final_boxes_list}")
-    # print(f"DEBUG: Final scores list: {final_scores_list}")
 
     # List of [x1,y1,x2,y2] normalized [0,1] relative to image + list of confidence scores
     return final_boxes_list, final_scores_list
@@ -184,7 +177,7 @@ def main(args):
                 "nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits", shell=True
             ).decode().strip().split('\n')[0])  # GPU 0 power
 
-            # Inference → pred shape [1, gh, gw, 6]
+            # Inference → pred shape [1, gh, gw, K, 6]
             pred = model(event) 
 
             # Postprocess → list of [x1, y1, x2, y2, conf]
@@ -273,7 +266,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/", help="Path to model folder")
-    parser.add_argument("--model_name", type=str, default="18", help="Model name (subfolder in runs)")
+    parser.add_argument("--model_name", type=str, default="19", help="Model name (subfolder in runs)")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
     parser.add_argument("--sequence", type=str, default="1", help="Sequence for real data")
