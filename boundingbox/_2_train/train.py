@@ -1,5 +1,7 @@
 # train.py
 import datetime
+import sys
+from scipy import signal
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -27,27 +29,27 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
     """
     YOLO-style loss for single-class, single-object-per-image detection.
     
-    pred:   [B, gh, gw, 6]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf, class_prob
+    pred:   [B, gh, gw, K, 6]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf + class_prob
 
     target: [B, 4]            [cx, cy, w, h] normalized [0,1] relative to image
 
     """
-    B, gh, gw, _ = pred.shape
+    B, gh, gw, K, _ = pred.shape
     device = pred.device
 
     # ── 1. Decode predictions ──
-    pred_cx = pred[..., 0] # normalized offset [0,1] within cell
-    pred_cy = pred[..., 1] # normalized offset [0,1] within cell
-    pred_w  = pred[..., 2] # normalized width [0,1] relative to cell
-    pred_h  = pred[..., 3] # normalized height [0,1] relative to cell
-    pred_obj = pred[..., 4] # objectness confidence [0,1]
-    pred_cls = pred[..., 5]  # class prob (single class) [0,1]
+    pred_cx = pred[..., :, 0] # normalized offset [0,1] within cell
+    pred_cy = pred[..., :, 1] # normalized offset [0,1] within cell
+    pred_w  = pred[..., :, 2] # normalized width [0,1] relative to cell
+    pred_h  = pred[..., :, 3] # normalized height [0,1] relative to cell
+    pred_obj = pred[..., :, 4] # objectness confidence [0,1]
+    pred_cls = pred[..., :, 5]  # class prob (single class) [0,1]
 
-    # Reshape to [B, gh*gw, 6] for easier matching
-    pred_boxes = torch.stack([pred_cx, pred_cy, pred_w, pred_h], dim=-1)  # [B, gh, gw, 4]
-    pred_boxes = pred_boxes.view(B, -1, 4)                                # [B, num_cells, 4]
-    pred_obj   = pred_obj.view(B, -1)                                     # [B, num_cells]
-    pred_cls   = pred_cls.view(B, -1)                                     # [B, num_cells]
+    # Reshape to [B, gh*gw, K, 6] for easier matching
+    pred_boxes = torch.stack([pred_cx, pred_cy, pred_w, pred_h], dim=-1)  # [B, gh, gw, K, 4]
+    pred_boxes = pred_boxes.view(B, -1, K, 4)                                # [B, num_cells, K, 4]
+    pred_obj   = pred_obj.view(B, -1, K)                                     # [B, num_cells, K]
+    pred_cls   = pred_cls.view(B, -1, K)                                     # [B, num_cells, K]
 
 
 
@@ -64,16 +66,17 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
     gt_h = target[:, 3] * gh   
 
     # Create target boxes (broadcast to all cells, but loss only on responsible)
-    target_boxes = torch.stack([gt_cx, gt_cy, gt_w, gt_h], dim=1).unsqueeze(1)  # [B, 1, 4]
-    target_boxes = target_boxes.expand(-1, gh*gw, -1)                           # [B, num_cells, 4]
+    target_boxes = torch.stack([gt_cx, gt_cy, gt_w, gt_h], dim=1)  # [B, 4]
+    target_boxes = target_boxes.unsqueeze(1).expand(-1, gh*gw, -1)  # [B, num_cells, 4]
+    target_boxes = target_boxes.unsqueeze(2).expand(-1, -1, K, -1)  # [B, num_cells, K, 4]
 
 
 
     # ── 3. Prepare target_obj and target_cls ──
 
-    # Create target tensors [B, gh*gw]
-    target_obj = torch.zeros(B, gh*gw, device=device)   # 1 only for responsible cell
-    target_cls = torch.zeros(B, gh*gw, device=device)   # 1 for correct class
+    # Create target tensors [B, gh*gw, K]
+    target_obj = torch.zeros(B, gh*gw, K, device=device)   # 1 only for responsible cell
+    target_cls = torch.zeros(B, gh*gw, K, device=device)   # 1 for correct class
 
     # Grid cell centers in relative image coords
     grid_x_centers = torch.arange(gw, device=device, dtype=torch.float32) + 0.5  # [gw]
@@ -142,22 +145,25 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
 
     # Final soft target: Gaussian peak × edge falloff
     soft_target = gaussian_weight * edge_falloff  # [B, gh, gw]
+    soft_target = soft_target[..., None].expand(-1, -1, -1, K)  # [B, gh, gw, K]
+    target_obj = soft_target.view(B, -1, K)  # [B, gh*gw, K]
+    target_cls = soft_target.view(B, -1, K)  # [B, gh*gw, K]
 
     # Flatten and assign
-    flat_soft = soft_target.view(B, -1)  # [B, num_cells]
-    target_obj = flat_soft # [B, num_cells]
-    target_cls = flat_soft  # same for class (single-class) [B, num_cells]
+    # flat_soft = soft_target.view(B, -1)  # [B, num_cells]
+    # target_obj = flat_soft # [B, num_cells]
+    # target_cls = flat_soft  # same for class (single-class) [B, num_cells]
 
     # Optional: force 1.0 exactly at center cell (strongest supervision)
     center_idx = cell_y * gw + cell_x
     batch_idx = torch.arange(B, device=device)
-    target_obj[batch_idx, center_idx] = 1.0
-    target_cls[batch_idx, center_idx] = 1.0
+    target_obj[batch_idx, center_idx, :] = 1.0
+    target_cls[batch_idx, center_idx, :] = 1.0
 
 
     # ── 4. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
-    box_mask = target_obj > 0.5
+    box_mask = target_obj > 0.5 # [B, num_cells, K] 
     box_loss = 0.0
 
     # - 4.1 - MSE on box parameters (simple but less effective)
@@ -175,10 +181,10 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
     # Aim for box_loss ~< 0.2
     if box_mask.any():
         # CIoU loss (standard implementation)
-        pred_xy = pred_boxes[..., :2]           # [B, num_cells, 2]
-        pred_wh = pred_boxes[..., 2:4]          # [B, num_cells, 2]
-        gt_xy = target_boxes[..., :2]           # [B, num_cells, 2]
-        gt_wh = target_boxes[..., 2:4]          # [B, num_cells, 2]
+        pred_xy = pred_boxes[..., :2]           # [B, num_cells, K, 2]
+        pred_wh = pred_boxes[..., 2:4]          # [B, num_cells, K, 2]
+        gt_xy = target_boxes[..., :2]           # [B, num_cells, K, 2]
+        gt_wh = target_boxes[..., 2:4]          # [B, num_cells, K, 2]
 
         # Intersection area
         inter_wh = torch.min(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
@@ -195,7 +201,7 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
         iou = inter_area / (union_area + 1e-6)
 
         # Center distance squared
-        c2 = ((pred_xy - gt_xy)**2).sum(dim=-1)  # [B, num_cells]
+        c2 = ((pred_xy - gt_xy)**2).sum(dim=-1)  # [B, num_cells, K]
 
         # Smallest enclosing box diagonal squared
         enclose_wh = torch.max(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
@@ -212,7 +218,7 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
         ciou = iou - (c2 / enclose_diag) - alpha * v
 
         # Mean over responsible cells
-        ciou_loss = (1 - ciou) * box_mask.float()
+        ciou_loss = (1 - ciou) * box_mask.float() # [B, num_cells, K]
         box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
 
     # - 4.3 - Focal loss on objectness confidence
@@ -286,6 +292,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
 
 ##################### Validate #####################
 def validate(model, loader, criterion, device):
+    
     model.eval()
     total_loss = 0.0
     total_box = 0.0
@@ -305,6 +312,39 @@ def validate(model, loader, criterion, device):
     return total_loss / n, total_box / n, total_obj / n, total_cls / n
 
 
+# Global variables to access last known values (update them in loop)
+global_last_epoch = 0
+global_best_val_loss = float('inf')
+global_last_val_loss = float('inf')
+global_last_train_box = 0.0
+global_last_val_box = 0.0
+global_last_model_state = None
+
+
+##################### Save on Interrupt #####################
+def save_on_interrupt(model_dir):
+    print("\nInterrupt received — saving final results...")
+
+    # Save model state_dict
+    if global_last_model_state is not None:
+        interrupt_path = os.path.join(model_dir, f"interrupted_epoch_{global_last_epoch}.pth")
+        torch.save(global_last_model_state, interrupt_path)
+        print(f"Saved interrupted model: {interrupt_path}")
+    else:
+        print("No model state to save (interrupted before first epoch)")
+    
+    with open(os.path.join(model_dir, "details.txt"), "a") as f:
+        f.write(f"-------------------------\n")
+        f.write(f"Results (interrupted):\n")
+        f.write(f"Final epoch: {global_last_epoch}\n")
+        f.write(f"Best val loss: {global_best_val_loss:.6f}\n")
+        f.write(f"Last val loss: {global_last_val_loss:.6f}\n")
+        f.write(f"Last train box loss: {global_last_train_box:.6f}\n")
+        f.write(f"Last val box loss: {global_last_val_box:.6f}\n")
+        f.write(f"Stopped at epoch {global_last_epoch}\n")
+    
+    sys.exit(0)
+    
 ##################### Main #####################
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -341,6 +381,10 @@ def main(args):
 
         
 
+    # Register handler
+    signal.signal(signal.SIGINT, save_on_interrupt(model_dir))
+
+    
     # Datasets & Loaders
     train_ds = SatelliteBBDataset(split='train', satellite=args.satellite, sequence=args.sequence, distance=args.distance)
     val_ds   = SatelliteBBDataset(split='val',   satellite=args.satellite, sequence=args.sequence, distance=args.distance)
@@ -394,11 +438,19 @@ def main(args):
         writer.add_scalar("Val/loss_epoch/box", val_box, epoch)
         writer.add_scalar("Learning_rate", optimizer.param_groups[0]['lr'], epoch)
 
+        # Update global variables for interrupt handler
+        global_last_epoch = epoch
+        global_last_val_loss = val_loss
+        global_last_train_box = train_box
+        global_last_val_box = val_box
+        global_last_model_state = model.state_dict()
+
         scheduler.step(val_loss)
 
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
             best_val_loss = val_loss
+            global_best_val_loss = best_val_loss
             epochs_no_improve = 0
             torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pth"))
             print(f"→ Improved! Saved best model (val_loss: {val_loss:.6f})")
