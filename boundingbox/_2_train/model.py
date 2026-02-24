@@ -26,7 +26,8 @@ class SimpleConvBlock(nn.Module):
 
     def forward(self, x):
         return self.block(x)
-    
+
+
 class ResidualBlock(nn.Module):
     def __init__(self, channels, kernel_size=3):
         super().__init__()
@@ -142,14 +143,16 @@ class EventBBNet(nn.Module):
 
         feat = self.backbone_final(feat)  # [B, base*16, H/32, W/32]
 
-        # Detection head: [B, C*16, H/32, W/32] -> [B, 6, H/32, W/32]
+        # Detection head: [B, C*16, H/32, W/32] -> [B, K*6, H/32, W/32]
         pred = self.head(feat) 
 
         # Get shape values from [B, K*6, H/32, W/32]
         B, C, gh, gw = pred.shape
 
-        # Reshape to [B, K, 6, gh, gw] → [B, gh, gw, K, 6]
+        # Reshape to [B, K, 6, gh, gw]
         pred = pred.view(B, self.K, 6, gh, gw) 
+
+        # Reshape from [B, K, 6, gh, gw] → [B, gh, gw, K, 6]
         pred = pred.permute(0, 3, 4, 1, 2).contiguous() 
 
         # Selective activation: [B, gh, gw, K, 6] -> [B, gh, gw, K, 6]

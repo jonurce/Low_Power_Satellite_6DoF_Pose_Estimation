@@ -12,4 +12,4 @@ Loss weights:    w_box=10.0, w_obj=10.0, w_cls=10.0
 Focal loss gamma: gamma_obj=1.0, gamma_cls=1.0
 Focal loss alpha: alpha_obj=2.0, alpha_cls=2.0
 Sigma for soft targets: 3.0
-Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
+Notes: Improved backbone + K predictions per grid cell

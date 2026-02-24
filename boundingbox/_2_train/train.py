@@ -31,12 +31,12 @@ global_last_val_loss = float('inf')
 global_last_train_box = 0.0
 global_last_val_box = 0.0
 global_last_model_state = None
-global_model_dir = None
+global_model_dir = ""
 
 
 
 ##################### YOLO-style loss (simplified for single-class) #####################
-def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj, alpha_cls, sigma):
+def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     """
     YOLO-style loss for single-class, single-object-per-image detection.
     
@@ -234,12 +234,12 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
 
     # - 4.3 - Focal loss on objectness confidence
     # far_mask = distance > 4.0  # [B, gh, gw]
-    obj_loss = focal_loss(pred_obj, target_obj, gamma=gamma_obj, alpha=alpha_obj)
+    obj_loss = focal_loss(pred_obj, target_obj, gamma=gamma_obj)
     # obj_loss[far_mask] = 0.0   # ignore very distant negatives
     # obj_loss = obj_loss.mean() * remove mean from focal_loss and apply after cls_loss
 
     # - 4.4 - Focal loss on class probability (same target as objectness for single-class)
-    cls_loss = focal_loss(pred_cls, target_cls, gamma=gamma_cls, alpha=alpha_cls)
+    cls_loss = focal_loss(pred_cls, target_cls, gamma=gamma_cls)
 
 
 
@@ -251,7 +251,7 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, alpha_obj
     return total_loss, box_loss, obj_loss, cls_loss
 
 ##################### Focal Loss #####################
-def focal_loss(inputs, targets, gamma, alpha):
+def focal_loss(inputs, targets, gamma):
 
     # bce: 0 for perfect prediction, inf for worst prediction
     bce = nn.BCELoss(reduction='none')(inputs, targets)
@@ -259,8 +259,8 @@ def focal_loss(inputs, targets, gamma, alpha):
     # pt: 1 for perfect prediction, 0 for worst prediction
     pt = torch.exp(-bce)
 
-    # Focal loss: modulate BCE with (1-pt)^gamma and alpha
-    return (alpha * (1 - pt) ** gamma * bce).mean()
+    # Focal loss: modulate BCE with (1-pt)^gamma
+    return ((1 - pt) ** gamma * bce).mean()
 
 ##################### Train one epoch #####################
 def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
@@ -277,7 +277,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         
         optimizer.zero_grad()
         pred = model(event)
-        loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, alpha_obj=args.alpha_obj, alpha_cls=args.alpha_cls, sigma=args.sigma)
+        loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
         loss.backward()
         optimizer.step()
         
@@ -287,6 +287,12 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         writer.add_scalar("Train/loss_batch/box", box_loss.item(), global_step)
         writer.add_scalar("Train/loss_batch/obj", obj_loss.item(), global_step)
         writer.add_scalar("Train/loss_batch/cls", cls_loss.item(), global_step)
+
+        # TensorBoard log: max objectness confidence and class probability
+        max_obj = pred[..., 4].max().item()
+        max_cls = pred[..., 5].max().item()
+        writer.add_scalar("Train/batch/max_obj_conf", max_obj, global_step)
+        writer.add_scalar("Train/batch/max_class_prob", max_cls, global_step)
 
         total_loss += loss.item()
         total_box += box_loss.item()
@@ -302,7 +308,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
     return epoch_avg_loss, total_box / num_batches, total_obj / num_batches, total_cls / num_batches
 
 ##################### Validate #####################
-def validate(model, loader, criterion, device):
+def validate(model, epoch, writer, loader, criterion, device):
     
     model.eval()
     total_loss = 0.0
@@ -313,11 +319,17 @@ def validate(model, loader, criterion, device):
         for rgb, event, bbox in tqdm(loader, desc="Validation"):
             event, bbox = event.to(device), bbox.to(device)
             pred = model(event)
-            loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, alpha_obj=args.alpha_obj, alpha_cls=args.alpha_cls, sigma=args.sigma)
+            loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
             total_loss += loss.item()
             total_box += box_loss.item()
             total_obj += obj_loss.item()
             total_cls += cls_loss.item()
+
+            # TensorBoard log: max objectness confidence and class probability
+            max_obj = pred[..., 4].max().item()
+            max_cls = pred[..., 5].max().item()
+            writer.add_scalar("Val/max_obj_conf", max_obj, epoch)
+            writer.add_scalar("Val/max_class_prob", max_cls, epoch)
     
     n = len(loader)
     return total_loss / n, total_box / n, total_obj / n, total_cls / n
@@ -376,7 +388,6 @@ def main(args):
         f.write(f"Device:          x{torch.cuda.device_count()} {torch.cuda.get_device_name(0)}\n")
         f.write(f"Loss weights:    w_box={args.w_box}, w_obj={args.w_obj}, w_cls={args.w_cls}\n")
         f.write(f"Focal loss gamma: gamma_obj={args.gamma_obj}, gamma_cls={args.gamma_cls}\n")
-        f.write(f"Focal loss alpha: alpha_obj={args.alpha_obj}, alpha_cls={args.alpha_cls}\n")
         f.write(f"Sigma for soft targets: {args.sigma}\n")
         f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
 
@@ -424,9 +435,9 @@ def main(args):
 
     for epoch in range(1, max_epochs + 1):
         train_loss, train_box, train_obj, train_cls = train_one_epoch(
-            model, epoch, writer, train_loader, optimizer, criterion, device
-        )
-        val_loss, val_box, val_obj, val_cls = validate(model, val_loader, criterion, device)
+            model, epoch, writer, train_loader, optimizer, criterion, device)
+        val_loss, val_box, val_obj, val_cls = validate(
+            model, epoch, writer, val_loader, criterion, device)
 
         print(f"Epoch [{epoch}/{args.epochs}] | "
               f"Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f} | "
@@ -489,7 +500,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
-    parser.add_argument("--start_count",   type=int,   default=18,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=20,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="boundingbox/_2_train/runs", help="Save directory")
     parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
@@ -501,9 +512,7 @@ if __name__ == "__main__":
     parser.add_argument("--w_obj",        type=float, default=10.0,    help="Weight for objectness loss")
     parser.add_argument("--w_cls",        type=float, default=10.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--alpha_obj",    type=float, default=2.0,    help="Focal loss alpha for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
-    parser.add_argument("--alpha_cls",    type=float, default=2.0,    help="Focal loss alpha for class")
     parser.add_argument("--sigma",        type=float, default=3.0,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
