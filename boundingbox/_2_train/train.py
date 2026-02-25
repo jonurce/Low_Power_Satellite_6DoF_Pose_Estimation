@@ -480,7 +480,7 @@ def main(args):
             if os.path.exists(prev_path):
                 os.remove(prev_path)
 
-    with open(os.path.join(details_path, "details.txt"), "a") as f:
+    with open(os.path.join(details_path), "a") as f:
         f.write(f"-------------------------\n")
         f.write(f"Results:\n")
         f.write(f"Final epoch: {epoch}\n")
@@ -509,11 +509,11 @@ if __name__ == "__main__":
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
     parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=10.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=10.0,    help="Weight for class loss")
+    parser.add_argument("--w_obj",        type=float, default=30.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=30.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
-    parser.add_argument("--sigma",        type=float, default=3.0,     help="Sigma for Gaussian soft targets")
+    parser.add_argument("--sigma",        type=float, default=1.0,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
     main(args)

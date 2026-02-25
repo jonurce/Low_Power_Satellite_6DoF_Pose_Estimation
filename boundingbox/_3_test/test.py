@@ -266,7 +266,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/", help="Path to model folder")
-    parser.add_argument("--model_name", type=str, default="21", help="Model name (subfolder in runs)")
+    parser.add_argument("--model_name", type=str, default="25", help="Model name (subfolder in runs)")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
     parser.add_argument("--sequence", type=str, default="1", help="Sequence for real data")
