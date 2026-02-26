@@ -1,0 +1,15 @@
+Bounding Box Training Run
+-------------------------
+Satellite:       cassini
+Sequence:       1
+Distance:       close
+Batch size:      64
+Max epochs:      500
+Learning rate:   0.0003
+Device:          x2 GPUs
+Notes:           Single-class (satellite), event-only input
+Notes: Notes: total_loss = 100 * box_loss (CIoU) + 1 * p_obj_loss (BCE) + 0.5 * p_class_loss (BCE)
+Notes: patience 100 + max epochs 500 (keep it high for convergence)
+longer training: min_delta_pct 0.00005 (0.005%)
+increase weight decay to 6e-5
+Results: better than 5, worse than 6, similar to 4: val_loss_box = 0.3 / train_loss_box = 0.33

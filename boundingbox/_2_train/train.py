@@ -25,13 +25,13 @@ import os
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
 
 # Global variables to access last known values (update them in loop)
-global_last_epoch = 0
-global_best_val_loss = float('inf')
-global_last_val_loss = float('inf')
-global_last_train_box = 0.0
-global_last_val_box = 0.0
-global_last_model_state = None
-global_model_dir = ""
+GLOBAL_LAST_EPOCH = 0
+GLOBAL_BEST_VAL_LOSS = float('inf')
+GLOBAL_LAST_VAL_LOSS = float('inf')
+GLOBAL_LAST_TRAIN_LOSS = 0.0
+GLOBAL_LAST_VAL_BOX = 0.0
+GLOBAL_LAST_MODEL_STATE = None
+GLOBAL_MODEL_DIR = ""
 
 
 
@@ -339,24 +339,28 @@ def save_on_interrupt(signal_received, frame):
     print("\nInterrupt received — saving final results...")
 
     # Save model state_dict
-    if global_last_model_state is not None:
-        interrupt_path = os.path.join(global_model_dir, f"interrupted_epoch_{global_last_epoch}.pth")
-        torch.save(global_last_model_state, interrupt_path)
+    if GLOBAL_LAST_MODEL_STATE is not None:
+        interrupt_path = os.path.join(GLOBAL_MODEL_DIR, f"interrupted_epoch_{GLOBAL_LAST_EPOCH}.pth")
+        torch.save(GLOBAL_LAST_MODEL_STATE, interrupt_path)
         print(f"Saved interrupted model: {interrupt_path}")
     else:
         print("No model state to save (interrupted before first epoch)")
     
-    with open(os.path.join(global_model_dir, "details.txt"), "a") as f:
+    with open(os.path.join(GLOBAL_MODEL_DIR, "details.txt"), "a") as f:
         f.write(f"-------------------------\n")
         f.write(f"Results (interrupted):\n")
-        f.write(f"Final epoch: {global_last_epoch}\n")
-        f.write(f"Best val loss: {global_best_val_loss:.6f}\n")
-        f.write(f"Last val loss: {global_last_val_loss:.6f}\n")
-        f.write(f"Last train box loss: {global_last_train_box:.6f}\n")
-        f.write(f"Last val box loss: {global_last_val_box:.6f}\n")
-        f.write(f"Stopped at epoch {global_last_epoch}\n")
+        f.write(f"Final epoch: {GLOBAL_LAST_EPOCH}\n")
+        f.write(f"Best val loss: {GLOBAL_BEST_VAL_LOSS:.6f}\n")
+        f.write(f"Last val loss: {GLOBAL_LAST_VAL_LOSS:.6f}\n")
+        f.write(f"Last train loss: {GLOBAL_LAST_TRAIN_LOSS:.6f}\n")
+        f.write(f"Last val box loss: {GLOBAL_LAST_VAL_BOX:.6f}\n")
+        f.write(f"Stopped at epoch {GLOBAL_LAST_EPOCH}\n")
     
     sys.exit(0)
+
+
+# ##################### Register handler #####################
+signal.signal(signal.SIGINT, save_on_interrupt)
     
 ##################### Main #####################
 def main(args):
@@ -367,14 +371,15 @@ def main(args):
     counter = args.start_count
     while True:
         model_subdir = f"{counter}"
-        global_model_dir = os.path.join(args.save_dir, model_subdir)
-        if not os.path.exists(global_model_dir):
-            os.makedirs(global_model_dir, exist_ok=True)
+        global GLOBAL_MODEL_DIR
+        GLOBAL_MODEL_DIR = os.path.join(args.save_dir, model_subdir)
+        if not os.path.exists(GLOBAL_MODEL_DIR):
+            os.makedirs(GLOBAL_MODEL_DIR, exist_ok=True)
             break
         counter += 1
 
     # Save run details
-    details_path = os.path.join(global_model_dir, "details.txt")
+    details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
     with open(details_path, "w") as f:
         f.write(f"Bounding Box Training Run\n")
         f.write(f"Single-class (satellite), event-only input\n")
@@ -391,11 +396,6 @@ def main(args):
         f.write(f"Sigma for soft targets: {args.sigma}\n")
         f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
 
-        
-
-    # Register handler
-    signal.signal(signal.SIGINT, save_on_interrupt)
-
     
     # Datasets & Loaders
     train_ds = SatelliteBBDataset(split='train', satellite=args.satellite, sequence=args.sequence, distance=args.distance)
@@ -410,7 +410,7 @@ def main(args):
     model = EventBBNet().to(device)
 
     # TensorBoard
-    writer = SummaryWriter(log_dir=global_model_dir)
+    writer = SummaryWriter(log_dir=GLOBAL_MODEL_DIR)
 
     # Log model graph
     dummy_event = torch.randn(1, 1, 720, 800).to(device)
@@ -451,20 +451,23 @@ def main(args):
         writer.add_scalar("Learning_rate", optimizer.param_groups[0]['lr'], epoch)
 
         # Update global variables for interrupt handler
-        global_last_epoch = epoch
-        global_last_val_loss = val_loss
-        global_last_train_box = train_box
-        global_last_val_box = val_box
-        global_last_model_state = model.state_dict()
+        global GLOBAL_LAST_EPOCH, GLOBAL_LAST_TRAIN_LOSS, GLOBAL_LAST_VAL_LOSS, GLOBAL_LAST_TRAIN_BOX, GLOBAL_LAST_VAL_BOX, GLOBAL_LAST_MODEL_STATE
+        GLOBAL_LAST_EPOCH = epoch
+        GLOBAL_LAST_TRAIN_LOSS = train_loss
+        GLOBAL_LAST_VAL_LOSS = val_loss
+        GLOBAL_LAST_TRAIN_BOX = train_box
+        GLOBAL_LAST_VAL_BOX = val_box
+        GLOBAL_LAST_MODEL_STATE = model.state_dict()
 
         scheduler.step(val_loss)
 
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
             best_val_loss = val_loss
-            global_best_val_loss = best_val_loss
+            global GLOBAL_BEST_VAL_LOSS
+            GLOBAL_BEST_VAL_LOSS = best_val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(global_model_dir, "best_model.pth"))
+            torch.save(model.state_dict(), os.path.join(GLOBAL_MODEL_DIR, "best_model.pth"))
             print(f"→ Improved! Saved best model (val_loss: {val_loss:.6f})")
         else:
             epochs_no_improve += 1
@@ -475,8 +478,8 @@ def main(args):
                 break
 
         if epoch % 5 == 0:
-            torch.save(model.state_dict(), os.path.join(global_model_dir, f"checkpoint_epoch_{epoch}.pth"))
-            prev_path = os.path.join(global_model_dir, f"checkpoint_epoch_{epoch - 5}.pth")
+            torch.save(model.state_dict(), os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch}.pth"))
+            prev_path = os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch - 5}.pth")
             if os.path.exists(prev_path):
                 os.remove(prev_path)
 
@@ -509,11 +512,11 @@ if __name__ == "__main__":
     parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
     parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=30.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=30.0,    help="Weight for class loss")
+    parser.add_argument("--w_obj",        type=float, default=100.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=100.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
-    parser.add_argument("--sigma",        type=float, default=0.1,     help="Sigma for Gaussian soft targets")
+    parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
     main(args)
