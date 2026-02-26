@@ -513,7 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--w_cls",        type=float, default=30.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
-    parser.add_argument("--sigma",        type=float, default=1.0,     help="Sigma for Gaussian soft targets")
+    parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
     main(args)

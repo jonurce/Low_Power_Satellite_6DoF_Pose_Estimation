@@ -15,7 +15,7 @@ from boundingbox._2_train.model import EventBBNet
 import argparse
 
 ##################### Postprocess #####################
-def postprocess(pred, conf_thresh=0.2, iou_thresh=0.4):
+def postprocess(pred, conf_thresh, iou_thresh):
     """
     Simple NMS + filtering for single-class YOLO output.
     pred: [B, gh, gw, K, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf + class_prob
@@ -181,7 +181,7 @@ def main(args):
             pred = model(event) 
 
             # Postprocess → list of [x1, y1, x2, y2, conf]
-            final_boxes, final_scores = postprocess(pred)
+            final_boxes, final_scores = postprocess(pred, conf_thresh=args.conf_thresh, iou_thresh=args.iou_thresh)
 
             # End timing (inference + postprocess)
             latency = time.time() - start_time
@@ -250,6 +250,10 @@ def main(args):
         f.write(f"Test Dataset: {args.satellite}_{args.sequence}_{args.distance} \n")
         f.write(f"Samples evaluated: {num_samples}\n")
         f.write(f"\n")
+        f.write(f"Postprocessing:\n")
+        f.write(f"Confidence threshold: {args.conf_thresh}\n")
+        f.write(f"IoU threshold: {args.iou_thresh}\n")
+        f.write(f"\n")
         f.write(f"Mean IoU: {avg_iou:.4f}\n")
         f.write(f"Avg Latency: {avg_latency:.2f} ms\n")
         f.write(f"Avg FPS: {fps:.2f}\n")
@@ -263,15 +267,16 @@ def main(args):
 
 if __name__ == "__main__":
     
-
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="boundingbox/_2_train/runs/", help="Path to model folder")
-    parser.add_argument("--model_name", type=str, default="25", help="Model name (subfolder in runs)")
+    parser.add_argument("--model_name", type=str, default="26", help="Model name (subfolder in runs)")
+    parser.add_argument("--save_dir", type=str, default="boundingbox/_3_test/results", help="Save directory")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
     parser.add_argument("--sequence", type=str, default="1", help="Sequence for real data")
     parser.add_argument("--distance", type=str, default="close", help="Distance for real data")
-    parser.add_argument("--save_dir", type=str, default="boundingbox/_3_test/results", help="Save directory")
+    parser.add_argument("--conf_thresh", type=float, default=0.2, help="Confidence threshold for postprocessing")
+    parser.add_argument("--iou_thresh", type=float, default=0.4, help="IoU threshold for NMS in postprocessing")
 
     args = parser.parse_args()
     main(args)
