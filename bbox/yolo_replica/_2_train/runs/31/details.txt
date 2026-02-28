@@ -1,0 +1,26 @@
+Bounding Box Training Run
+Single-class (satellite), event-only input
+-------------------------
+Model Info:
+Total parameters: 5,158,770
+Trainable parameters: 5,158,770
+-------------------------
+Satellite:       cassini
+Sequence:       1
+Distance:       close
+Batch size:      64
+Max epochs:      500
+Learning rate:   0.0003
+Device:          x2 NVIDIA GeForce RTX 3090 Ti
+Loss weights:    w_box=10.0, w_obj=300.0, w_cls=300.0
+Focal loss gamma: gamma_obj=1.0, gamma_cls=1.0
+Sigma for soft targets: 0.6
+Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
+-------------------------
+Results (interrupted):
+Final epoch: 226
+Best val loss: 1.060366
+Last val loss: 1.066371
+Last train loss: 2.269034
+Last val box loss: 0.052360
+Stopped at epoch 226
