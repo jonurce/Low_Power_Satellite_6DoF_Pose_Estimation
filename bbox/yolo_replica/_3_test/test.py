@@ -268,7 +268,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="bbox/yolo_replica/_2_train/runs/", help="Path to model folder")
-    parser.add_argument("--model_name", type=str, default="30", help="Model name (subfolder in runs)")
+    parser.add_argument("--model_name", type=str, default="33", help="Model name (subfolder in runs)")
     parser.add_argument("--save_dir", type=str, default="bbox/yolo_replica/_3_test/results", help="Save directory")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--split", type=str, default='test', help="Dataset split to evaluate on")
