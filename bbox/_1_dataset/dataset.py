@@ -20,7 +20,7 @@ import os
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
 
 class SatelliteBBDataset(Dataset):
-    def __init__(self, split='train', satellite='cassini', sequence='1', distance='close'):
+    def __init__(self, split='train'):
         """
         split:
             'train' -> synthetic 80%, with augmentations
@@ -32,24 +32,51 @@ class SatelliteBBDataset(Dataset):
         distance: 'close' or 'far' (only in test with real data)
 
         """
+        
         self.root_dir = "_dataset/"
+        self.img_dirs = []
+        self.label_dirs = []
 
-        # Define paths, depending on train / val / test
-        if 'train' in split:
-            self.img_dir = os.path.join(self.root_dir, 'synthetic', satellite, 'frames') # 00001_rgb.png , 00001_event.png, ...
-            self.label_dir = os.path.join(self.root_dir, 'synthetic', satellite, 'train.json')
-        elif 'val' in split:
-            self.img_dir = os.path.join(self.root_dir, 'synthetic', satellite, 'frames')
-            self.label_dir = os.path.join(self.root_dir, 'synthetic', satellite, 'test.json')
+        if split == 'train' or split == 'val':
+            # Synthetic: combine all satellites
+            label_file = 'train.json' if split == 'train' else 'test.json'
+            for sat in ['cassini', 'satty', 'soho']:
+                base = os.path.join(self.root_dir, 'synthetic', sat)
+                self.img_dirs.append(os.path.join(base, 'frames'))
+                self.label_dirs.append(os.path.join(base, label_file))
         else:
-            self.img_dir = os.path.join(self.root_dir, 'real', f'{satellite}-{sequence}-{distance}', 'frames')
-            self.label_dir = os.path.join(self.root_dir, 'real', f'{satellite}-{sequence}-{distance}', 'test.json')
+            # Real: combine all real folders (all sequences + distances)
+            real_base = os.path.join(self.root_dir, 'real')
+            for item in os.listdir(real_base):
+                item_path = os.path.join(real_base, item)
+                if os.path.isdir(item_path):
+                    self.img_dirs.append(os.path.join(item_path, 'frames'))
+                    self.label_dirs.append(os.path.join(item_path, 'test.json'))
 
         # Load labels
-        with open(self.label_dir, 'r') as file:
-            self.labels = json.load(file) 
-            # dict {"annotations": [{"filename_rgb": 00001_rgb.png, "filename_event": 00001_event.png, 
+        self.labels = {"annotations": []}
+        # dict {"annotations": [{"filename_rgb": 00001_rgb.png, "filename_event": 00001_event.png, 
             #       "bbox": [ x1, y1, x2, y2 ] }] }
+        sat_to_class = {'cassini': 0, 'satty': 1, 'soho': 2}
+
+        for img_dir, label_dir in zip(self.img_dirs, self.label_dirs):
+            
+            if not os.path.exists(label_dir):
+                continue
+
+            # Extract satellite name from path (e.g. from synthetic/cassini/...)
+            # Assuming structure: .../synthetic/<sat>/... or .../real/<sat>-...
+            sat = img_dir.split('/')[-2].split('-')[0] if split == 'test' else img_dir.split('/')[-2]
+            
+            if sat not in sat_to_class:
+                continue  # skip unknown
+
+            with open(label_dir, 'r') as f:
+                data = json.load(f)
+                for ann in data["annotations"]:
+                    ann['filepath'] = img_dir
+                    ann['class_id'] = sat_to_class[sat]
+                    self.labels["annotations"].append(ann)
         
         
         # Only transform if split is train (separate for rgb and event frames)
@@ -124,7 +151,7 @@ class SatelliteBBDataset(Dataset):
 
         # Get name, path and image for rgb
         rgb_name = label_dict["filename_rgb"]
-        rgb_path = os.path.join(self.img_dir, rgb_name)
+        rgb_path = os.path.join(label_dict["filepath"], rgb_name)
         rgb_img = cv2.imread(rgb_path)
         if rgb_img is None:
             raise FileNotFoundError(f"Image missing for {rgb_name}")
@@ -132,14 +159,13 @@ class SatelliteBBDataset(Dataset):
 
         # Get name, path and image for event
         event_name = label_dict["filename_event"]
-        event_path = os.path.join(self.img_dir, event_name)
+        event_path = os.path.join(label_dict["filepath"], event_name)
         event_img = cv2.imread(event_path, cv2.IMREAD_GRAYSCALE)
         if event_img is None:
             raise FileNotFoundError(f"Image missing for {event_name}")
         
         # Get original bbox: [x1, y1, x2, y2] absolute pixels + check its correct
         bbox = label_dict['bbox']
-        # bbox = list(label_dict['bbox'])
         
         # Apply common augmentations
         augmented = self.common_transform(
@@ -170,4 +196,7 @@ class SatelliteBBDataset(Dataset):
         h = max(0.0, min(1.0, h))
         bbox_yolo = np.array([cx, cy, w, h], dtype=np.float32)
 
-        return rgb_img.float() / 255.0, event_img.float()/ 255.0, bbox_yolo
+        # Get class id: {'cassini': 0, 'satty': 1, 'soho': 2}
+        class_id = label_dict.get('class_id', 0)  # default 0 if missing
+
+        return rgb_img.float() / 255.0, event_img.float()/ 255.0, bbox_yolo, torch.tensor(class_id)

@@ -36,13 +36,15 @@ GLOBAL_MODEL_DIR = ""
 
 
 ##################### YOLO-style loss (simplified for single-class) #####################
-def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
+def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     """
-    YOLO-style loss for single-class, single-object-per-image detection.
+    YOLO-style loss, single-object-per-image detection.
     
-    pred:   [B, gh, gw, K, 6]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf + class_prob
+    pred:   [B, gh, gw, K, 8]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf + x3 class_prob
 
     target: [B, 4]            [cx, cy, w, h] normalized [0,1] relative to image
+
+    target_class_id: [B]       class index (0-cassini, 1-satty, or 2-soho)
 
     """
     B, gh, gw, K, _ = pred.shape
@@ -54,14 +56,13 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     pred_w  = pred[..., :, 2] # normalized width [0,1] relative to cell
     pred_h  = pred[..., :, 3] # normalized height [0,1] relative to cell
     pred_obj = pred[..., :, 4] # objectness confidence [0,1]
-    pred_cls = pred[..., :, 5]  # class prob (single class) [0,1]
+    pred_classes = pred[..., :, 5:]  # class probs [0,1]
 
     # Reshape to [B, gh*gw, K, 6] for easier matching
     pred_boxes = torch.stack([pred_cx, pred_cy, pred_w, pred_h], dim=-1)  # [B, gh, gw, K, 4]
     pred_boxes = pred_boxes.view(B, -1, K, 4)                                # [B, num_cells, K, 4]
     pred_obj   = pred_obj.view(B, -1, K)                                     # [B, num_cells, K]
-    pred_cls   = pred_cls.view(B, -1, K)                                     # [B, num_cells, K]
-
+    pred_classes   = pred_classes.view(B, -1, K, pred_classes.shape[-1])     # [B, num_cells, K, num_classes]
 
 
 
@@ -85,9 +86,11 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
 
     # ── 3. Prepare target_obj and target_cls ──
 
-    # Create target tensors [B, gh*gw, K]
-    target_obj = torch.zeros(B, gh*gw, K, device=device)   # 1 only for responsible cell
-    target_cls = torch.zeros(B, gh*gw, K, device=device)   # 1 for correct class
+    # Create target tensor for object prob [B, gh*gw, K]: 1 only for responsible cell (soft)
+    target_obj = torch.zeros(B, gh*gw, K, device=device) 
+
+    # Create target tensor for class prob [B, gh*gw, K, num_classes]: 1 for correct class in responsible cell (soft)
+    target_classes = torch.zeros(B, gh*gw, K, pred_classes.shape[-1], device=device) 
 
     # Grid cell centers in relative image coords
     grid_x_centers = torch.arange(gw, device=device, dtype=torch.float32) + 0.5  # [gw]
@@ -158,7 +161,6 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     soft_target = gaussian_weight * edge_falloff  # [B, gh, gw]
     soft_target = soft_target[..., None].expand(-1, -1, -1, K)  # [B, gh, gw, K]
     target_obj = soft_target.view(B, -1, K)  # [B, gh*gw, K]
-    target_cls = soft_target.view(B, -1, K)  # [B, gh*gw, K]
 
     # Flatten and assign
     # flat_soft = soft_target.view(B, -1)  # [B, num_cells]
@@ -169,7 +171,10 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     center_idx = cell_y * gw + cell_x
     batch_idx = torch.arange(B, device=device)
     target_obj[batch_idx, center_idx, :] = 1.0
-    target_cls[batch_idx, center_idx, :] = 1.0
+
+    # Set 1.0 and soft value for the correct class in responsible cells
+    target_classes[batch_idx[:, None], torch.arange(gh*gw)[None, :], :, target_class_id[:, None]] = soft_target.view(B, -1, K)
+    target_classes[batch_idx, center_idx, :, target_class_id] = 1.0 # [B, gh*gw, K, num_classes]
 
 
     # ── 4. Compute losses ──
@@ -238,8 +243,9 @@ def yolo_loss(pred, target, w_box, w_obj, w_cls, gamma_obj, gamma_cls, sigma):
     # obj_loss[far_mask] = 0.0   # ignore very distant negatives
     # obj_loss = obj_loss.mean() * remove mean from focal_loss and apply after cls_loss
 
-    # - 4.4 - Focal loss on class probability (same target as objectness for single-class)
-    cls_loss = focal_loss(pred_cls, target_cls, gamma=gamma_cls)
+    # - 4.4 - Focal loss on class probability (same target as objectness but for multiple-class)
+    cls_loss = focal_loss(pred_classes, target_classes, gamma=gamma_cls)
+
 
 
 
@@ -272,12 +278,12 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
     num_batches = len(loader)
     running_loss = 0.0
 
-    for batch_idx, (rgb, event, bbox) in enumerate(tqdm(loader, desc="Training")):
-        event, bbox = event.to(device), bbox.to(device)
+    for batch_idx, (rgb, event, bbox, class_id) in enumerate(tqdm(loader, desc="Training")):
+        event, bbox, class_id = event.to(device), bbox.to(device), class_id.to(device)
         
         optimizer.zero_grad()
         pred = model(event)
-        loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+        loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
         loss.backward()
         optimizer.step()
         
@@ -290,7 +296,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
 
         # TensorBoard log: max objectness confidence and class probability
         max_obj = pred[..., 4].max().item()
-        max_cls = pred[..., 5].max().item()
+        max_cls = pred[..., 5:].max().item()
         writer.add_scalar("Train/batch/max_obj_conf", max_obj, global_step)
         writer.add_scalar("Train/batch/max_class_prob", max_cls, global_step)
 
@@ -316,10 +322,10 @@ def validate(model, epoch, writer, loader, criterion, device):
     total_obj = 0.0
     total_cls = 0.0
     with torch.no_grad():
-        for batch_idx, (rgb, event, bbox) in enumerate(tqdm(loader, desc="Validation")):
-            event, bbox = event.to(device), bbox.to(device)
+        for batch_idx, (rgb, event, bbox, class_id) in enumerate(tqdm(loader, desc="Validation")):
+            event, bbox, class_id = event.to(device), bbox.to(device), class_id.to(device)
             pred = model(event)
-            loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+            loss, box_loss, obj_loss, cls_loss = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
             total_loss += loss.item()
             total_box += box_loss.item()
             total_obj += obj_loss.item()
@@ -327,12 +333,14 @@ def validate(model, epoch, writer, loader, criterion, device):
 
             # TensorBoard log: max objectness confidence and class probability
             max_obj = pred[..., 4].max().item()
-            max_cls = pred[..., 5].max().item()
-            writer.add_scalar("Val/max_obj_conf", max_obj, epoch)
-            writer.add_scalar("Val/max_class_prob", max_cls, epoch)
+            max_cls = pred[..., 5:].max().item()
 
             # TensorBoard batch logging
             global_step = epoch * len(loader) + batch_idx
+            writer.add_scalar("Val/loss_batch", loss.item(), global_step)
+            writer.add_scalar("Val/loss_batch/box", box_loss.item(), global_step)
+            writer.add_scalar("Val/loss_batch/obj", obj_loss.item(), global_step)
+            writer.add_scalar("Val/loss_batch/cls", cls_loss.item(), global_step)
             writer.add_scalar("Val/batch/max_obj_conf", max_obj, global_step)
             writer.add_scalar("Val/batch/max_class_prob", max_cls, global_step)
     
@@ -363,7 +371,6 @@ def save_on_interrupt(signal_received, frame):
     
     sys.exit(0)
 
-
 # ##################### Register handler #####################
 signal.signal(signal.SIGINT, save_on_interrupt)
     
@@ -387,7 +394,7 @@ def main(args):
     details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
     with open(details_path, "w") as f:
         f.write(f"Bounding Box Training Run\n")
-        f.write(f"Single-class (satellite), event-only input\n")
+        f.write(f"Multi-class (satellites), event-only input\n")
         f.write(f"-------------------------\n")
 
     # Model
@@ -401,9 +408,6 @@ def main(args):
         f.write(f"Total parameters: {total_params:,}\n")
         f.write(f"Trainable parameters: {trainable_params:,}\n")
         f.write(f"-------------------------\n")
-        f.write(f"Satellite:       {args.satellite}\n")
-        f.write(f"Sequence:       {args.sequence}\n")
-        f.write(f"Distance:       {args.distance}\n")
         f.write(f"Batch size:      {args.batch_size}\n")
         f.write(f"Max epochs:      {args.epochs}\n")
         f.write(f"Learning rate:   {args.lr}\n")
@@ -415,8 +419,8 @@ def main(args):
 
     
     # Datasets & Loaders
-    train_ds = SatelliteBBDataset(split='train', satellite=args.satellite, sequence=args.sequence, distance=args.distance)
-    val_ds   = SatelliteBBDataset(split='val',   satellite=args.satellite, sequence=args.sequence, distance=args.distance)
+    train_ds = SatelliteBBDataset(split='train')
+    val_ds   = SatelliteBBDataset(split='val')
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=4, pin_memory=True, drop_last=True)
@@ -447,9 +451,12 @@ def main(args):
     epochs_no_improve = 0
     max_epochs = args.epochs
 
+    # Training loop
     for epoch in range(1, max_epochs + 1):
+
         train_loss, train_box, train_obj, train_cls = train_one_epoch(
             model, epoch, writer, train_loader, optimizer, criterion, device)
+        
         val_loss, val_box, val_obj, val_cls = validate(
             model, epoch, writer, val_loader, criterion, device)
 
@@ -462,6 +469,10 @@ def main(args):
         writer.add_scalar("Val/loss_epoch/total", val_loss, epoch)
         writer.add_scalar("Train/loss_epoch/box", train_box, epoch)
         writer.add_scalar("Val/loss_epoch/box", val_box, epoch)
+        writer.add_scalar("Train/loss_epoch/obj", train_obj, epoch)
+        writer.add_scalar("Val/loss_epoch/obj", val_obj, epoch)
+        writer.add_scalar("Train/loss_epoch/cls", train_cls, epoch)
+        writer.add_scalar("Val/loss_epoch/cls", val_cls, epoch)
         writer.add_scalar("Learning_rate", optimizer.param_groups[0]['lr'], epoch)
 
         # Update global variables for interrupt handler
@@ -517,14 +528,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
-    parser.add_argument("--start_count",   type=int,   default=33,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
     parser.add_argument("--batch_size",   type=int,   default=64,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
-    parser.add_argument("--satellite",    type=str,   default="cassini", help="Satellite name")
-    parser.add_argument("--sequence",     type=str,   default="1",       help="Sequence number")
-    parser.add_argument("--distance",    type=str,   default="close",    help="Distance")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
     parser.add_argument("--w_obj",        type=float, default=1000.0,    help="Weight for objectness loss")
     parser.add_argument("--w_cls",        type=float, default=1000.0,    help="Weight for class loss")

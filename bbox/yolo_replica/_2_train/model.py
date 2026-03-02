@@ -48,10 +48,11 @@ class EventBBNet(nn.Module):
     """
     Simple from-scratch CNN for bounding box regression on event images.
     Input: Event (1, H, W) normalized [0,1]
-    Output: YOLO-like grid predictions [B, grid_h, grid_w, num_anchors, 6]
-           where 6 = [cx, cy, w, h, obj_conf, class_prob] (class always 0)
+    Output: YOLO-like grid predictions [B, grid_h, grid_w, num_anchors, 8]
+           where 8 = [cx, cy, w, h, obj_conf, class_0_prob, class_1_prob, class_2_prob],
+           and class_prob {'cassini': 0, 'satty': 1, 'soho': 2}
     """
-    def __init__(self, input_size=(720, 800), base_channels=32, K=3):
+    def __init__(self, input_size=(720, 800), base_channels=32, K=3, num_classes=3):
         super().__init__()
 
         # Event backbone (1 input channel)
@@ -108,13 +109,16 @@ class EventBBNet(nn.Module):
         )
 
         # Number of predictions per grid cell
-        self.K = K  
+        self.K = K 
+        self.num_classes = num_classes 
 
-        # Detection head
         # Output: a list of K elements, each being (5 + num_class): cx, cy, w, h, obj_conf, class_prob_0 ... class_prob_(num_class-1)
+        self.head_out_channels = K * (4 + 1 + num_classes)  # 4 box params + 1 obj_conf + num_classes class probs
+        
+        # Detection head
         self.head = nn.Conv2d(
             base_channels * 16,   # input channels from backbone
-            K * 6,                # K * (4 box params + obj_conf + 1 class)
+            self.head_out_channels,  
             kernel_size=1,        # 1x1 conv
             stride=1,
             padding=0
@@ -122,8 +126,8 @@ class EventBBNet(nn.Module):
 
         # Bias for obj_conf & class_prob → start with higher logit (~0.5–0.9 prob)
         for k in range(self.K):
-            nn.init.constant_(self.head.bias[4 + k * 6], 10.0) # logit(0.99995) ≈ 4.0
-            nn.init.constant_(self.head.bias[5 + k * 6], 2.0) # logit(~0.88) ≈ 2.0
+            nn.init.constant_(self.head.bias[4 + k * (4 + 1 + num_classes)], 10.0) # logit(0.99995) ≈ 4.0
+            nn.init.constant_(self.head.bias[5 + k * (4 + 1 + num_classes)], 2.0) # logit(~0.88) ≈ 2.0
 
     def forward(self, event):
         # Feature extraction: [B, C=1, H, W] -> [B, C*16, H/32, W/32]
@@ -143,24 +147,25 @@ class EventBBNet(nn.Module):
 
         feat = self.backbone_final(feat)  # [B, base*16, H/32, W/32]
 
-        # Detection head: [B, C*16, H/32, W/32] -> [B, K*6, H/32, W/32]
+        # Detection head: [B, C*16, H/32, W/32] -> [B, K*8, H/32, W/32]
         pred = self.head(feat) 
 
-        # Get shape values from [B, K*6, H/32, W/32]
+        # Get shape values from [B, K*8, H/32, W/32]
         B, C, gh, gw = pred.shape
 
-        # Reshape to [B, K, 6, gh, gw]
-        pred = pred.view(B, self.K, 6, gh, gw) 
+        # Reshape to [B, K, 8, gh, gw]
+        pred = pred.view(B, self.K, (4 + 1 + self.num_classes), gh, gw) 
 
-        # Reshape from [B, K, 6, gh, gw] → [B, gh, gw, K, 6]
+        # Reshape from [B, K, 8, gh, gw] → [B, gh, gw, K, 8]
         pred = pred.permute(0, 3, 4, 1, 2).contiguous() 
 
-        # Selective activation: [B, gh, gw, K, 6] -> [B, gh, gw, K, 6]
+        # Selective activation: [B, gh, gw, K, 8] -> [B, gh, gw, K, 8]
         pred[..., 0:2] = torch.sigmoid(pred[..., 0:2])          # cx, cy → [0,1] (dim=-1)
         pred[..., 2:4] = torch.exp(pred[..., 2:4])              # w, h → positive & can be >>1
-        pred[..., 4:]  = torch.sigmoid(pred[..., 4:])           # obj_conf, class_prob → [0,1]
+        pred[..., 4]  = torch.sigmoid(pred[..., 4])             # obj_conf → [0,1]
+        pred[..., 5:] = torch.softmax(pred[..., 5:], dim=-1)    # class_prob → [0,1] sum to 1
 
-        # Prediction: [B, gh, gw, K, 6] (for each grid -> K*6)
+        # Prediction: [B, gh, gw, K, 8] (for each grid -> K*8)
         return pred
 
 
