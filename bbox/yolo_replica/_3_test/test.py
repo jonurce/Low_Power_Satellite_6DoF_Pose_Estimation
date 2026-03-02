@@ -17,9 +17,9 @@ import argparse
 ##################### Postprocess #####################
 def postprocess(pred, conf_thresh, iou_thresh):
     """
-    Simple NMS + filtering for single-class YOLO output.
-    pred: [B, gh, gw, K, 6] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf + class_prob
-    Returns list of [x1, y1, x2, y2, conf] per image, normalized [0,1] relative to image
+    Simple NMS + filtering for multi-class YOLO output.
+    pred: [B, gh, gw, K, 8] → [cx, cy, w, h] normalized [0,1] relative to each cell + obj_conf + x3 class_prob
+    Returns list of [x1, y1, x2, y2, conf, class_idx] per image, normalized [0,1] relative to image
     """
     B, gh, gw, K, C = pred.shape
     device = pred.device
@@ -46,21 +46,23 @@ def postprocess(pred, conf_thresh, iou_thresh):
 
     # Extract boxes and scores
     boxes = pred[..., :4]  # [B, num_cells*K, 4] cx, cy, w, h normalized [0,1] relative to image
-    scores = pred[..., 4] * pred[..., 5]  # obj_conf * class_prob [B, num_cells*K]
+    scores = pred[..., 4] * pred[..., 5:].max(dim=-1)[0]  # obj_conf * max(class_prob) [B, num_cells*K]
 
     # Filter by confidence
     keep = scores > conf_thresh # [B, num_cells*K] boolean mask
 
     final_boxes_list = [] # list of N [x1,y1,x2,y2] normalized [0,1] relative to image
     final_scores_list = [] # list of N confidence scores for the final boxes
+    final_class_list = [] # list of N class indices for the final boxes
 
     for b in range(B):
-        keep_b = keep[b]  # [num_cells*K]
+        keep_b = keep[b]  # [num_cells*K] boolean
         if not keep_b.any():
             continue
 
         boxes_b = boxes[b][keep_b]      # [num_cells*K, 4]
         scores_b = scores[b][keep_b]    # [num_cells*K]
+        pred_class_b = pred[b, :, :, 5:].argmax(dim=-1).flatten()  # [num_cells*K]
 
         # Convert to [x1,y1,x2,y2] normalized [0,1] relative to image
         x1 = boxes_b[:, 0] - boxes_b[:, 2] / 2
@@ -95,12 +97,15 @@ def postprocess(pred, conf_thresh, iou_thresh):
         # Collect final boxes & scores for this image
         final_boxes_b = boxes_xyxy[torch.tensor(keep_idx, device=device)]
         final_scores_b = scores_b[torch.tensor(keep_idx, device=device)]
+        final_class_b = pred_class_b[torch.tensor(keep_idx, device=device)]
+
 
         final_boxes_list.append(final_boxes_b.cpu().numpy())
         final_scores_list.append(final_scores_b.cpu().numpy())
+        final_class_list.append(final_class_b.cpu().numpy())
 
-    # List of [x1,y1,x2,y2] normalized [0,1] relative to image + list of confidence scores
-    return final_boxes_list, final_scores_list
+    # List of [x1,y1,x2,y2] normalized [0,1] relative to image + list of confidence scores + list of class indices
+    return final_boxes_list, final_scores_list, final_class_list
 
 ##################### Compute IoU #####################
 def compute_iou(box1, box2):
@@ -151,22 +156,23 @@ def main(args):
     model.eval()
 
     # Test dataset
-    test_ds = SatelliteBBDataset(split=args.split, satellite=args.satellite,
-                                 sequence=args.sequence, distance=args.distance)
+    test_ds = SatelliteBBDataset(split=args.split)
     # test_ds.labels["annotations"] = test_ds.labels["annotations"][:10]  # only first 10 samples
     test_loader = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=False)
 
     total_iou = 0.0
+    total_correct_class = 0.0
+    pred_class_correct = 0
     num_samples = 0
     latencies = []
     power_readings = []
 
-    pro_obj_max = 0.0
+    prob_obj_max = 0.0
     prob_class_max = 0.0
     num_samples = 0
 
     with torch.no_grad():
-        for rgb, event, bbox in tqdm(test_loader, desc="Testing"):
+        for rgb, event, bbox, class_id in tqdm(test_loader, desc="Testing"):
             event = event.to(device)
 
             # Start timing (seconds)
@@ -180,8 +186,8 @@ def main(args):
             # Inference → pred shape [1, gh, gw, K, 6]
             pred = model(event) 
 
-            # Postprocess → list of [x1, y1, x2, y2, conf]
-            final_boxes, final_scores = postprocess(pred, conf_thresh=args.conf_thresh, iou_thresh=args.iou_thresh)
+            # Postprocess → list of [x1, y1, x2, y2, conf, class_idx]
+            final_boxes, final_scores, final_classes = postprocess(pred, conf_thresh=args.conf_thresh, iou_thresh=args.iou_thresh)
 
             # End timing (inference + postprocess)
             latency = time.time() - start_time
@@ -195,8 +201,10 @@ def main(args):
             power_readings.append(avg_power)
 
             # Track max object confidence and class probability for analysis
-            pro_obj_max += pred[..., 4].max().item()
-            prob_class_max += pred[..., 5].max().item()
+            prob_obj_max += pred[..., 4].max().item()
+            prob_class_max += pred[..., 5:].max().item()
+            correct_class_prob = pred[0, ..., 5 + class_id.item()].max().item()  # max prob of GT class
+            total_correct_class += correct_class_prob
 
             # GT [cx, cy, w, h] normalized [0,1] relative to image (assuming single GT bbox per image)
             gt_bbox = bbox.numpy()[0]  
@@ -219,12 +227,12 @@ def main(args):
                 if len(pred_boxes_np) == 0:
                     iou = 0.0
                 else:
-                    # Pick highest score box
-                    # best_idx = np.argmax(pred_scores_np)
-                    # pred_xyxy = pred_boxes_np[best_idx]  # [x1,y1,x2,y2]
-
+                    # Pick highest score box: first in the list after NMS
                     # [1, 4] vs [1, 4] -> IoU scalar [1, 1]
                     iou = compute_iou(torch.tensor([pred_boxes_np[0]]), torch.tensor([gt_xyxy])).max().item()
+
+                    if final_classes[0] == class_id.item():
+                        pred_class_correct += 1
             else:
                 iou = 0.0
 
@@ -232,21 +240,23 @@ def main(args):
             num_samples += 1
 
     avg_iou = total_iou / num_samples
+    avg_correct_class = total_correct_class / num_samples
+    class_accuracy = pred_class_correct / num_samples
     avg_latency = np.mean(latencies) * 1000  # ms
     fps = 1 / np.mean(latencies)
     avg_power_w = np.mean(power_readings)
     energy_per_sample_mj = avg_power_w * avg_latency  # mJ per sample
 
-    avg_max_obj = pro_obj_max / num_samples
+    avg_max_obj = prob_obj_max / num_samples
     avg_max_class = prob_class_max / num_samples
 
     # Save results
     save_dir = os.path.join(args.save_dir, args.model_name)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
-    with open(os.path.join(save_dir, f"{args.split}_{args.satellite}_{args.sequence}_{args.distance}.txt"), "w") as f:
+    with open(os.path.join(save_dir, f"{args.split}.txt"), "w") as f:
         f.write(f"Evaluated Model: {args.model_path}/{args.model_name}/best_model.pth\n")
-        f.write(f"Dataset: {args.split}_{args.satellite}_{args.sequence}_{args.distance} \n")
+        f.write(f"Dataset: {args.split} \n")
         f.write(f"Samples evaluated: {num_samples}\n")
         f.write(f"\n")
         f.write(f"Postprocessing:\n")
@@ -254,6 +264,8 @@ def main(args):
         f.write(f"IoU threshold: {args.iou_thresh}\n")
         f.write(f"\n")
         f.write(f"Mean IoU: {avg_iou:.4f}\n")
+        f.write(f"Avg max prob of GT class: {avg_correct_class:.4f}\n")
+        f.write(f"Class accuracy: {class_accuracy:.4f}\n")
         f.write(f"Avg Latency: {avg_latency:.2f} ms\n")
         f.write(f"Avg FPS: {fps:.2f}\n")
         f.write(f"Avg Power: {avg_power_w:.1f} W\n")
@@ -261,6 +273,7 @@ def main(args):
         f.write(f"\n")
         f.write(f"Avg max obj_conf: {avg_max_obj:.4f}\n")
         f.write(f"Avg max class_prob: {avg_max_class:.4f}\n")
+        
 
 
 
@@ -272,9 +285,6 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="bbox/yolo_replica/_3_test/results", help="Save directory")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
     parser.add_argument("--split", type=str, default='test', help="Dataset split to evaluate on")
-    parser.add_argument("--satellite", type=str, default="cassini", help="Satellite name")
-    parser.add_argument("--sequence", type=str, default="2", help="Sequence for real data")
-    parser.add_argument("--distance", type=str, default="close", help="Distance for real data")
     parser.add_argument("--conf_thresh", type=float, default=0.1, help="Confidence threshold for postprocessing")
     parser.add_argument("--iou_thresh", type=float, default=0.9, help="IoU threshold for NMS in postprocessing")
 
