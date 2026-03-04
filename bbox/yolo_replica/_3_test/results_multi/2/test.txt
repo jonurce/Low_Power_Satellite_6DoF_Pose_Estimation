@@ -1,0 +1,18 @@
+Evaluated Model: bbox/yolo_replica/_2_train/runs//2/best_model.pth
+Dataset: test 
+Samples evaluated: 7894
+
+Postprocessing:
+Confidence threshold: 0.1
+IoU threshold: 0.9
+
+Mean IoU: 0.0442
+Avg max prob of GT class: 0.3643
+Class accuracy: 0.2991
+Avg Latency: 24.42 ms
+Avg FPS: 40.96
+Avg Power: 112.0 W
+Estimated energy per sample: 2734.5 mJ
+
+Avg max obj_conf: 0.2661
+Avg max class_prob: 0.3848

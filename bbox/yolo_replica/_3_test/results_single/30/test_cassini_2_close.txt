@@ -1,0 +1,16 @@
+Evaluated Model: bbox/yolo_replica/_2_train/runs//30/best_model.pth
+Dataset: test_cassini_2_close 
+Samples evaluated: 261
+
+Postprocessing:
+Confidence threshold: 0.1
+IoU threshold: 0.9
+
+Mean IoU: 0.2165
+Avg Latency: 19.63 ms
+Avg FPS: 50.93
+Avg Power: 100.9 W
+Estimated energy per sample: 1981.7 mJ
+
+Avg max obj_conf: 0.2784
+Avg max class_prob: 0.2935

@@ -1,0 +1,12 @@
+Evaluated Model: bbox/yolo_replica/_2_train/runs//17/best_model.pth
+Test Dataset: cassini_1_close 
+Samples evaluated: 277
+
+Mean IoU: 0.1884
+Avg Latency: 20.06 ms
+Avg FPS: 49.84
+Avg Power: 110.3 W
+Estimated energy per sample: 2213.5 mJ
+
+Avg max obj_conf: 0.4525
+Avg max class_prob: 0.4006

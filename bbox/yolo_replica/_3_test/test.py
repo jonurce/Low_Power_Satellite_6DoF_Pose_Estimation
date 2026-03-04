@@ -62,7 +62,7 @@ def postprocess(pred, conf_thresh, iou_thresh):
 
         boxes_b = boxes[b][keep_b]      # [num_cells*K, 4]
         scores_b = scores[b][keep_b]    # [num_cells*K]
-        pred_class_b = pred[b, :, :, 5:].argmax(dim=-1).flatten()  # [num_cells*K]
+        pred_class_b = pred[b, :, 5:].argmax(dim=-1).flatten()  # [num_cells*K]
 
         # Convert to [x1,y1,x2,y2] normalized [0,1] relative to image
         x1 = boxes_b[:, 0] - boxes_b[:, 2] / 2
@@ -223,6 +223,7 @@ def main(args):
                 # final_boxes[0] is the array for the only image [N, 4]
                 pred_boxes_np = final_boxes[0]  # [N, 4]
                 pred_scores_np = final_scores[0]  # [N]
+                pred_classes_np = final_classes[0]  # [N]
                 
                 if len(pred_boxes_np) == 0:
                     iou = 0.0
@@ -231,7 +232,7 @@ def main(args):
                     # [1, 4] vs [1, 4] -> IoU scalar [1, 1]
                     iou = compute_iou(torch.tensor([pred_boxes_np[0]]), torch.tensor([gt_xyxy])).max().item()
 
-                    if final_classes[0] == class_id.item():
+                    if pred_classes_np[0] == class_id.item():
                         pred_class_correct += 1
             else:
                 iou = 0.0
@@ -281,10 +282,10 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Test Event-based Bounding Box Model")
     parser.add_argument("--model_path", type=str, default="bbox/yolo_replica/_2_train/runs/", help="Path to model folder")
-    parser.add_argument("--model_name", type=str, default="33", help="Model name (subfolder in runs)")
-    parser.add_argument("--save_dir", type=str, default="bbox/yolo_replica/_3_test/results", help="Save directory")
+    parser.add_argument("--model_name", type=str, default="3", help="Model name (subfolder in runs)")
+    parser.add_argument("--save_dir", type=str, default="bbox/yolo_replica/_3_test/results_multi", help="Save directory")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size (keep 1 for accurate timing)")
-    parser.add_argument("--split", type=str, default='test', help="Dataset split to evaluate on")
+    parser.add_argument("--split", type=str, default='val', help="Dataset split to evaluate on")
     parser.add_argument("--conf_thresh", type=float, default=0.1, help="Confidence threshold for postprocessing")
     parser.add_argument("--iou_thresh", type=float, default=0.9, help="IoU threshold for NMS in postprocessing")
 
