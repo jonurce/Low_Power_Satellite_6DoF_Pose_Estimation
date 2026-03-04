@@ -557,9 +557,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
     parser.add_argument("--w_obj",        type=float, default=1000.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=10.0,    help="Weight for class loss")
+    parser.add_argument("--w_cls",        type=float, default=100.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
+    parser.add_argument("--gamma_cls",    type=float, default=3.0,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
