@@ -324,7 +324,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         # optimizer.step()
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)  # important before clip
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
         scaler.step(optimizer)
         scaler.update()
         
@@ -692,15 +692,15 @@ if __name__ == "__main__":
 
     # Resume directory: resume_path or None
     resume_path = "bbox/yolo_replica/_2_train/runs/5/best_model.pth"
-    parser.add_argument("--resume", type=str, default=resume_path, help="Path to checkpoint to resume from")
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Training parameters
     parser.add_argument("--batch_size",   type=int,   default=256,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=1000.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=5000.0,    help="Weight for class loss")
+    parser.add_argument("--w_obj",        type=float, default=2000.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=6000.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=2.0,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
