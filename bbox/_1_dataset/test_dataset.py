@@ -9,6 +9,10 @@ train_ds = SatelliteBBDataset(split='train')
 val_ds = SatelliteBBDataset(split='val')
 test_ds = SatelliteBBDataset(split='test')
 
+print(f"Train samples: {len(train_ds)}, Val samples: {len(val_ds)}, Test samples: {len(test_ds)}")
+
+exit()
+
 for idx in range (10):
     # 2. Pick one sample from train and one from val
     rgb_train, event_train, bbox_train, class_id_train = train_ds[idx]

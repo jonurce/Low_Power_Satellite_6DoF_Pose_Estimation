@@ -1,7 +1,21 @@
 # dataset.py
+
 import os
-import json
+os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+os.environ["LIBPNG_NO_WARNINGS"] = "1"
+
+import sys
+# sys.stderr = open(os.devnull, 'w')
+
+import warnings
+warnings.filterwarnings("ignore", module="PIL")
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*libpng.*")
+warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
+warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+
 import cv2
+import json
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
@@ -10,14 +24,6 @@ from albumentations.pytorch import ToTensorV2
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="PIL")  # hides most PIL/PNG warnings
-warnings.filterwarnings("ignore", message="libpng warning")           # specifically targets the libpng spam
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
-
-# Silence libpng via environment (most effective)
-import os
-os.environ["LIBPNG_NO_WARNINGS"] = "1"
 
 class SatelliteBBDataset(Dataset):
     def __init__(self, split='train'):

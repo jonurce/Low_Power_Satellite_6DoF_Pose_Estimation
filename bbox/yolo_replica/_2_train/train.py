@@ -1,9 +1,24 @@
 # train.py
-import datetime
+
+import os
+os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+os.environ["LIBPNG_NO_WARNINGS"] = "1"
+
 import sys
+# sys.stderr = open(os.devnull, 'w')
+
+import warnings
+warnings.filterwarnings("ignore", module="PIL")
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*libpng.*")
+warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
+warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+
+import datetime
 import signal
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -11,18 +26,12 @@ from tqdm import tqdm
 import os
 import argparse
 from torch.utils.tensorboard import SummaryWriter
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import GradScaler, autocast
+scaler = GradScaler()
 
 from bbox._1_dataset.dataset import SatelliteBBDataset
 from model import EventBBNet
 
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="PIL")
-warnings.filterwarnings("ignore", message="libpng warning")
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
-
-import os
-os.environ["LIBPNG_NO_WARNINGS"] = "1"
 
 # Global variables to access last known values (update them in loop)
 GLOBAL_LAST_EPOCH = 0
@@ -31,6 +40,8 @@ GLOBAL_LAST_VAL_LOSS = float('inf')
 GLOBAL_LAST_TRAIN_LOSS = 0.0
 GLOBAL_LAST_VAL_BOX = 0.0
 GLOBAL_LAST_MODEL_STATE = None
+GLOBAL_LAST_OPTIMIZER_STATE = None
+GLOBAL_LAST_SCHEDULER_STATE = None
 GLOBAL_MODEL_DIR = ""
 
 
@@ -214,28 +225,41 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
         union_area = pred_area + gt_area - inter_area
 
         # IoU
-        iou = inter_area / (union_area + 1e-6)
+        iou = inter_area / (union_area + 1e-5)
+        iou = iou.clamp(min=0.0, max=1.0)
 
         # Center distance squared
         c2 = ((pred_xy - gt_xy)**2).sum(dim=-1)  # [B, num_cells, K]
+        c2 = c2.clamp(min=0.0)
 
         # Smallest enclosing box diagonal squared
         enclose_wh = torch.max(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
                      torch.min(pred_xy - pred_wh/2, gt_xy - gt_wh/2)
         enclose_wh = torch.clamp(enclose_wh, min=0.0)
-        enclose_diag = (enclose_wh[..., 0]**2 + enclose_wh[..., 1]**2) + 1e-6
+        enclose_diag = (enclose_wh[..., 0]**2 + enclose_wh[..., 1]**2)
+        enclose_diag = enclose_diag.clamp(min=1e-6)
 
         # Aspect ratio consistency (v term)
         v = (4 / (torch.pi**2)) * (torch.atan(pred_wh[..., 0]/pred_wh[..., 1].clamp(min=1e-6)) - \
                                    torch.atan(gt_wh[..., 0]/gt_wh[..., 1].clamp(min=1e-6)))**2
+        v = v.clamp(min=0.0, max=1.0)
 
         # CIoU
-        alpha = v / ((1 - iou + v) + 1e-6)
+        alpha = v / ((1 - iou + v).clamp(min=1e-6))
+        alpha = alpha.clamp(min=0.0, max=1.0)
         ciou = iou - (c2 / enclose_diag) - alpha * v
 
-        # Mean over responsible cells
-        ciou_loss = (1 - ciou) * box_mask.float() # [B, num_cells, K]
-        box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
+        valid_mask = (pred_wh[..., 0] > 0) & (pred_wh[..., 1] > 0) & \
+             (gt_wh[..., 0] > 0) & (gt_wh[..., 1] > 0)
+        
+        if not valid_mask.any():
+            box_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        else:
+            ciou_loss = (1 - ciou) * box_mask.float() * valid_mask.float()
+            box_loss = ciou_loss.sum() / (box_mask & valid_mask).sum().clamp(min=1)
+            # Mean over responsible cells
+            # ciou_loss = (1 - ciou) * box_mask.float() # [B, num_cells, K]
+            # box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
 
     # - 4.3 - Focal loss on objectness confidence
     # far_mask = distance > 4.0  # [B, gh, gw]
@@ -269,13 +293,14 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
 def focal_loss(inputs, targets, gamma):
 
     # bce: 0 for perfect prediction, inf for worst prediction
-    bce = nn.BCELoss(reduction='none')(inputs, targets)
+    # bce = nn.BCELoss(reduction='none')(inputs, targets)
+    bce = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
 
     # pt: 1 for perfect prediction, 0 for worst prediction
     pt = torch.exp(-bce)
 
     # Focal loss: modulate BCE with (1-pt)^gamma
-    return ((1 - pt) ** gamma * bce).mean()
+    return ((1 - pt) ** gamma * bce).mean() / inputs.shape[0]
 
 ##################### Train one epoch #####################
 def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
@@ -292,10 +317,16 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         event, bbox, class_id = event.to(device), bbox.to(device), class_id.to(device)
         
         optimizer.zero_grad()
-        pred = model(event)
-        loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
-        loss.backward()
-        optimizer.step()
+        with autocast(device_type='cuda'):
+            pred = model(event)
+            loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+        # loss.backward()
+        # optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)  # important before clip
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        scaler.step(optimizer)
+        scaler.update()
         
         # TensorBoard batch logging
         global_step = epoch * len(loader) + batch_idx
@@ -372,7 +403,24 @@ def save_on_interrupt(signal_received, frame):
     # Save model state_dict
     if GLOBAL_LAST_MODEL_STATE is not None:
         interrupt_path = os.path.join(GLOBAL_MODEL_DIR, f"interrupted_epoch_{GLOBAL_LAST_EPOCH}.pth")
-        torch.save(GLOBAL_LAST_MODEL_STATE, interrupt_path)
+        torch.save({
+            'epoch': GLOBAL_LAST_EPOCH,
+            'model_state_dict': GLOBAL_LAST_MODEL_STATE,
+            'optimizer_state_dict': GLOBAL_LAST_OPTIMIZER_STATE,
+            'scheduler_state_dict': GLOBAL_LAST_SCHEDULER_STATE,
+            'best_val_loss': GLOBAL_LAST_VAL_LOSS,
+            'hyperparameters': {
+                'batch_size': args.batch_size,
+                'epochs': args.epochs,
+                'lr': args.lr,
+                'w_box': args.w_box,
+                'w_obj': args.w_obj,
+                'w_cls': args.w_cls,
+                'gamma_obj': args.gamma_obj,
+                'gamma_cls': args.gamma_cls,
+                'sigma': args.sigma,
+            }
+        }, interrupt_path)
         print(f"Saved interrupted model: {interrupt_path}")
     else:
         print("No model state to save (interrupted before first epoch)")
@@ -397,80 +445,130 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create model directory with sequential numbering
-    counter = args.start_count
-    while True:
-        model_subdir = f"{counter}"
-        global GLOBAL_MODEL_DIR
-        GLOBAL_MODEL_DIR = os.path.join(args.save_dir, model_subdir)
-        if not os.path.exists(GLOBAL_MODEL_DIR):
-            os.makedirs(GLOBAL_MODEL_DIR, exist_ok=True)
-            break
-        counter += 1
-
-    # Save run details
-    details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
-    with open(details_path, "w") as f:
-        f.write(f"Bounding Box Training Run\n")
-        f.write(f"Multi-class (satellites), event-only input\n")
-        f.write(f"-------------------------\n")
-
     # Model
     model = EventBBNet().to(device)
-
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    with open(details_path, "a") as f:
-        f.write(f"Model Info:\n")
-        f.write(f"Total parameters: {total_params:,}\n")
-        f.write(f"Trainable parameters: {trainable_params:,}\n")
-        f.write(f"-------------------------\n")
-        f.write(f"Batch size:      {args.batch_size}\n")
-        f.write(f"Max epochs:      {args.epochs}\n")
-        f.write(f"Learning rate:   {args.lr}\n")
-        f.write(f"Device:          x{torch.cuda.device_count()} {torch.cuda.get_device_name(0)}\n")
-        f.write(f"Loss weights:    w_box={args.w_box}, w_obj={args.w_obj}, w_cls={args.w_cls}\n")
-        f.write(f"Focal loss gamma: gamma_obj={args.gamma_obj}, gamma_cls={args.gamma_cls}\n")
-        f.write(f"Sigma for soft targets: {args.sigma}\n")
-        f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
-
-    
-    # Datasets & Loaders
-    train_ds = SatelliteBBDataset(split='train')
-    val_ds   = SatelliteBBDataset(split='val')
-
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True, drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False,
-                              num_workers=4, pin_memory=True)
-
-    # TensorBoard
-    writer = SummaryWriter(log_dir=GLOBAL_MODEL_DIR)
-
-    # Log model graph
-    dummy_event = torch.randn(1, 1, 720, 800).to(device)
-    writer.add_graph(model, dummy_event)
-
-    # Multi-GPU (after graph, so it does not crash)
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
-        model = nn.DataParallel(model)
-
-    # Optimizer & Scheduler
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=6e-5)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    # Training criterion
     criterion = yolo_loss
 
-    # Early stopping
+    # Early stopping for training
     patience = 100
     min_delta_pct = 0.00005
     best_val_loss = float('inf')
     epochs_no_improve = 0
-    max_epochs = args.epochs
+    start_epoch = 1
+
+    # Handle resume training
+    global GLOBAL_MODEL_DIR
+    if args.resume is None:
+
+        # Create model directory with sequential numbering
+        counter = args.start_count
+        while True:
+            model_subdir = f"{counter}"
+            GLOBAL_MODEL_DIR = os.path.join(args.save_dir, model_subdir)
+            if not os.path.exists(GLOBAL_MODEL_DIR):
+                os.makedirs(GLOBAL_MODEL_DIR, exist_ok=True)
+                break
+            counter += 1
+
+        # Save run details
+        details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
+        with open(details_path, "w") as f:
+            f.write(f"Bounding Box Training Run\n")
+            f.write(f"Multi-class (satellites), event-only input\n")
+            f.write(f"-------------------------\n")
+            f.write(f"Model Info:\n")
+            f.write(f"Total parameters: {total_params:,}\n")
+            f.write(f"Trainable parameters: {trainable_params:,}\n")
+            f.write(f"-------------------------\n")
+            f.write(f"Batch size:      {args.batch_size}\n")
+            f.write(f"Max epochs:      {args.epochs}\n")
+            f.write(f"Learning rate:   {args.lr}\n")
+            f.write(f"Device:          x{torch.cuda.device_count()} {torch.cuda.get_device_name(0)}\n")
+            f.write(f"Loss weights:    w_box={args.w_box}, w_obj={args.w_obj}, w_cls={args.w_cls}\n")
+            f.write(f"Focal loss gamma: gamma_obj={args.gamma_obj}, gamma_cls={args.gamma_cls}\n")
+            f.write(f"Sigma for soft targets: {args.sigma}\n")
+            f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
+
+        # TensorBoard
+        writer = SummaryWriter(log_dir=GLOBAL_MODEL_DIR)
+
+        # Log model graph
+        dummy_event = torch.randn(1, 1, 720, 800).to(device)
+        writer.add_graph(model, dummy_event)
+
+        # Multi-GPU (after graph, so it does not crash)
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+            model = nn.DataParallel(model)
+            model = torch.compile(model)
+            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=6e-5)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+
+    else:
+
+        # Define GLOBAL_MODEL_DIR from args.resume
+        GLOBAL_MODEL_DIR = os.path.dirname(args.resume)  # .../runs/5/
+
+        # Define details path
+        details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
+
+        # Tensorboard writer: user already existing log inside GLOBAL_MODEL_DIR
+        writer = SummaryWriter(log_dir=GLOBAL_MODEL_DIR)
+
+        # Load model
+        checkpoint = torch.load(args.resume, map_location=device)
+
+        # model.load_state_dict(checkpoint['model_state_dict'])
+        state_dict = checkpoint['model_state_dict']
+
+        # Remove "_orig_mod.module." prefix from all keys
+        cleaned_state = {}
+        for k, v in state_dict.items():
+            new_k = k
+            if k.startswith("_orig_mod.module."):
+                new_k = k.replace("_orig_mod.module.", "")
+            elif k.startswith("module."):
+                new_k = k.replace("module.", "")
+            cleaned_state[new_k] = v
+
+        model.load_state_dict(cleaned_state)
+
+        # Load hyperparameters
+        if 'hyperparameters' in checkpoint:
+            loaded_hp = checkpoint['hyperparameters']
+            print("Loaded hyperparameters from checkpoint:")
+            for k, v in loaded_hp.items():
+                print(f"  {k}: {v}")
+                setattr(args, k, v)  # update args with loaded values
+        else:
+            print("No hyperparameters found in checkpoint — using current args")
+
+        # Multi-GPU (after graph, so it does not crash)
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+            model = nn.DataParallel(model)
+            model = torch.compile(model)
+            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=6e-5)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_loss = checkpoint['best_val_loss']
+        print(f"Resumed from epoch {start_epoch}, best val loss {best_val_loss:.6f}")
+
+    # Datasets & Loaders
+    train_ds = SatelliteBBDataset(split='train')
+    val_ds   = SatelliteBBDataset(split='val')
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # Training loop
-    for epoch in range(1, max_epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
 
         train_loss, train_box, train_obj, train_cls, train_class_acc = train_one_epoch(
             model, epoch, writer, train_loader, optimizer, criterion, device)
@@ -498,13 +596,16 @@ def main(args):
         writer.add_scalar("Learning_rate", optimizer.param_groups[0]['lr'], epoch)
 
         # Update global variables for interrupt handler
-        global GLOBAL_LAST_EPOCH, GLOBAL_LAST_TRAIN_LOSS, GLOBAL_LAST_VAL_LOSS, GLOBAL_LAST_TRAIN_BOX, GLOBAL_LAST_VAL_BOX, GLOBAL_LAST_MODEL_STATE
+        global GLOBAL_LAST_EPOCH, GLOBAL_LAST_TRAIN_LOSS, GLOBAL_LAST_VAL_LOSS, GLOBAL_LAST_TRAIN_BOX, GLOBAL_LAST_VAL_BOX, GLOBAL_LAST_MODEL_STATE, GLOBAL_LAST_OPTIMIZER_STATE, GLOBAL_LAST_SCHEDULER_STATE
         GLOBAL_LAST_EPOCH = epoch
         GLOBAL_LAST_TRAIN_LOSS = train_loss
         GLOBAL_LAST_VAL_LOSS = val_loss
         GLOBAL_LAST_TRAIN_BOX = train_box
         GLOBAL_LAST_VAL_BOX = val_box
+
         GLOBAL_LAST_MODEL_STATE = model.state_dict()
+        GLOBAL_LAST_OPTIMIZER_STATE = optimizer.state_dict()
+        GLOBAL_LAST_SCHEDULER_STATE = scheduler.state_dict()
 
         scheduler.step(val_loss)
 
@@ -514,7 +615,24 @@ def main(args):
             global GLOBAL_BEST_VAL_LOSS
             GLOBAL_BEST_VAL_LOSS = best_val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(GLOBAL_MODEL_DIR, "best_model.pth"))
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_loss': best_val_loss,
+                'hyperparameters': {
+                    'batch_size': args.batch_size,
+                    'epochs': args.epochs,
+                    'lr': args.lr,
+                    'w_box': args.w_box,
+                    'w_obj': args.w_obj,
+                    'w_cls': args.w_cls,
+                    'gamma_obj': args.gamma_obj,
+                    'gamma_cls': args.gamma_cls,
+                    'sigma': args.sigma,
+                }
+            }, os.path.join(GLOBAL_MODEL_DIR, "best_model.pth"))
             print(f"→ Improved! Saved best model (val_loss: {val_loss:.6f})")
         else:
             epochs_no_improve += 1
@@ -525,7 +643,24 @@ def main(args):
                 break
 
         if epoch % 5 == 0:
-            torch.save(model.state_dict(), os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch}.pth"))
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_loss': val_loss,
+                'hyperparameters': {
+                    'batch_size': args.batch_size,
+                    'epochs': args.epochs,
+                    'lr': args.lr,
+                    'w_box': args.w_box,
+                    'w_obj': args.w_obj,
+                    'w_cls': args.w_cls,
+                    'gamma_obj': args.gamma_obj,
+                    'gamma_cls': args.gamma_cls,
+                    'sigma': args.sigma,
+                }
+            }, os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch}.pth"))
             prev_path = os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch - 5}.pth")
             if os.path.exists(prev_path):
                 os.remove(prev_path)
@@ -540,7 +675,7 @@ def main(args):
         f.write(f"Last val box loss: {val_box:.6f}\n")
         if epochs_no_improve >= patience:
             f.write(f"Early stopping triggered\n")
-        elif epoch >= max_epochs:
+        elif epoch >= args.epochs:
             f.write(f"Reached max epochs\n")
         else:
             f.write(f"Stopped at epoch {epoch}\n")
@@ -550,16 +685,24 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
+
+    # Save directory
     parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
-    parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")
+
+    # Resume directory: resume_path or None
+    resume_path = "bbox/yolo_replica/_2_train/runs/5/best_model.pth"
+    parser.add_argument("--resume", type=str, default=resume_path, help="Path to checkpoint to resume from")
+
+    # Training parameters
+    parser.add_argument("--batch_size",   type=int,   default=256,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
     parser.add_argument("--w_obj",        type=float, default=1000.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=100.0,    help="Weight for class loss")
+    parser.add_argument("--w_cls",        type=float, default=5000.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--gamma_cls",    type=float, default=3.0,     help="Focal loss gamma for class")
+    parser.add_argument("--gamma_cls",    type=float, default=2.0,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()

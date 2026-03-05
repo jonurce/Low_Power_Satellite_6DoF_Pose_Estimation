@@ -1,15 +1,23 @@
 # model.py
+
+import os
+os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+os.environ["LIBPNG_NO_WARNINGS"] = "1"
+
+import sys
+# sys.stderr = open(os.devnull, 'w')
+
+import warnings
+warnings.filterwarnings("ignore", module="PIL")
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*libpng.*")
+warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
+warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="PIL")
-warnings.filterwarnings("ignore", message="libpng warning")
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
-
-import os
-os.environ["LIBPNG_NO_WARNINGS"] = "1"
 
 class SimpleConvBlock(nn.Module):
     """Basic convolutional block: Conv → BN → ReLU → optional MaxPool"""
