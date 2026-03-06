@@ -5,19 +5,19 @@ Model Info:
 Total parameters: 5,161,848
 Trainable parameters: 5,161,848
 -------------------------
-Batch size:      256
+Batch size:      128
 Max epochs:      500
 Learning rate:   0.0003
 Device:          x2 NVIDIA GeForce RTX 3090 Ti
-Loss weights:    w_box=10.0, w_obj=2000.0, w_cls=6000.0
+Loss weights:    w_box=10.0, w_obj=500.0, w_cls=200.0
 Focal loss gamma: gamma_obj=1.0, gamma_cls=2.0
 Sigma for soft targets: 0.6
 Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
 -------------------------
 Results (interrupted):
-Final epoch: 65
-Best val loss: 15.784801
-Last val loss: 15.884681
-Last train loss: 12.779197
-Last val box loss: 0.097496
-Stopped at epoch 65
+Final epoch: 49
+Best val loss: 13.598649
+Last val loss: 13.598649
+Last train loss: 14.492026
+Last val box loss: 0.266988
+Stopped at epoch 49

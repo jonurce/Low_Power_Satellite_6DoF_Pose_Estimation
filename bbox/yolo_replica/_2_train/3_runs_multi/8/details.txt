@@ -1,0 +1,23 @@
+Bounding Box Training Run
+Multi-class (satellites), event-only input
+-------------------------
+Model Info:
+Total parameters: 5,161,848
+Trainable parameters: 5,161,848
+-------------------------
+Batch size:      256
+Max epochs:      500
+Learning rate:   0.0003
+Device:          x2 NVIDIA GeForce RTX 3090 Ti
+Loss weights:    w_box=10.0, w_obj=1500.0, w_cls=3000.0
+Focal loss gamma: gamma_obj=1.0, gamma_cls=1.0
+Sigma for soft targets: 0.6
+Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
+-------------------------
+Results (interrupted):
+Final epoch: 60
+Best val loss: 2048.004883
+Last val loss: 2048.009888
+Last train loss: 2048.415177
+Last val box loss: 0.197291
+Stopped at epoch 60

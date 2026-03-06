@@ -1,0 +1,591 @@
+Bounding Box Training Run
+Multi-class (satellites), event-only input
+-------------------------
+Model Info:
+Total parameters: 5,161,848
+Trainable parameters: 5,161,848
+-------------------------
+Batch size:      256
+Max epochs:      500
+Learning rate:   0.0003
+Device:          x2 NVIDIA GeForce RTX 3090 Ti
+Loss weights:    w_box=10.0, w_obj=2000.0, w_cls=6000.0
+Focal loss gamma: gamma_obj=1.0, gamma_cls=2.0
+Sigma for soft targets: 0.6
+Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)
+-------------------------
+Results (interrupted):
+Final epoch: 65
+Best val loss: 15.784801
+Last val loss: 15.884681
+Last train loss: 12.779197
+Last val box loss: 0.097496
+Stopped at epoch 65
+-------------------------
+Results (interrupted):
+Final epoch: 65
+Best val loss: inf
+Last val loss: 15.787565
+Last train loss: 12.788406
+Last val box loss: 0.087786
+Stopped at epoch 65
+-------------------------
+Results (interrupted):
+Final epoch: 64
+Best val loss: 15.784801
+Last val loss: 15.876909
+Last train loss: 12.794336
+Last val box loss: 0.096717
+Stopped at epoch 64
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 0
+Best val loss: 15.784801
+Last val loss: inf
+Last train loss: 0.000000
+Last val box loss: 0.000000
+Stopped at epoch 0
+-------------------------
+Results (interrupted):
+Final epoch: 64
+Best val loss: 15.784801
+Last val loss: 15.847503
+Last train loss: 12.806444
+Last val box loss: 0.093799
+Stopped at epoch 64

@@ -3,16 +3,15 @@
 import os
 os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
+os.environ["PNG_QUIET"] = "1"
+
 
 import sys
 # sys.stderr = open(os.devnull, 'w')
 
 import warnings
-warnings.filterwarnings("ignore", module="PIL")
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*libpng.*")
-warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+# warnings.filterwarnings('ignore')
+# warnings.filterwarnings("ignore", message=".*duplicate.*")
 
 import cv2
 import json
@@ -23,8 +22,9 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from scipy.spatial.transform import Rotation as R
 import numpy as np
+import hide_warnings
 
-
+@hide_warnings.hide_warnings()
 class SatelliteBBDataset(Dataset):
     def __init__(self, split='train'):
         """

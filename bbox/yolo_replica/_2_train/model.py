@@ -3,16 +3,15 @@
 import os
 os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
+os.environ["PNG_QUIET"] = "1"
+
 
 import sys
 # sys.stderr = open(os.devnull, 'w')
 
 import warnings
-warnings.filterwarnings("ignore", module="PIL")
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*libpng.*")
-warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+# warnings.filterwarnings('ignore')
+# warnings.filterwarnings("ignore", message=".*duplicate.*")
 
 import torch
 import torch.nn as nn
@@ -37,6 +36,13 @@ class SimpleConvBlock(nn.Module):
 
 
 class ResidualBlock(nn.Module):
+    """
+    Current ResidualBlock → classic residual (good base)
+
+    If I add split/concat + multiple bottlenecks inside → it becomes CSP-like (Cross Stage Partial)
+
+    If I make the concat richer (all intermediate features) → it becomes C2f-like (YOLOv8 style, Cross Stage Partial with Feed-forward)
+    """
     def __init__(self, channels, kernel_size=3):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels//2, 1, bias=False)
@@ -132,10 +138,12 @@ class EventBBNet(nn.Module):
             padding=0
         )
 
-        # Bias for obj_conf & class_prob → start with higher logit (~0.5–0.9 prob)
+        # Bias for obj_conf & class_prob → start with higher logit: logit(0.99995) ≈ 4.0
         for k in range(self.K):
-            nn.init.constant_(self.head.bias[4 + k * (4 + 1 + num_classes)], 10.0) # logit(0.99995) ≈ 4.0
-            nn.init.constant_(self.head.bias[5 + k * (4 + 1 + num_classes)], 2.0) # logit(~0.88) ≈ 2.0
+            nn.init.constant_(self.head.bias[4 + k * (4 + 1 + num_classes)], 10.0) 
+            nn.init.constant_(self.head.bias[5 + k * (4 + 1 + num_classes)], 10.0) 
+            nn.init.constant_(self.head.bias[6 + k * (4 + 1 + num_classes)], 10.0)
+            nn.init.constant_(self.head.bias[7 + k * (4 + 1 + num_classes)], 10.0)
 
     def forward(self, event):
         # Feature extraction: [B, C=1, H, W] -> [B, C*16, H/32, W/32]

@@ -3,16 +3,14 @@
 import os
 os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
 os.environ["LIBPNG_NO_WARNINGS"] = "1"
+os.environ["PNG_QUIET"] = "1"
 
 import sys
 # sys.stderr = open(os.devnull, 'w')
 
 import warnings
-warnings.filterwarnings("ignore", module="PIL")
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", message=".*libpng.*")
-warnings.filterwarnings("ignore", message="libpng warning: eXIf: duplicate")
-warnings.filterwarnings("ignore", message=".*eXIf: duplicate.*")
+# warnings.filterwarnings('ignore')
+# warnings.filterwarnings("ignore", message=".*duplicate.*")
 
 import datetime
 import signal
@@ -20,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 import os
@@ -28,6 +26,8 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
 scaler = GradScaler()
+import numpy as np
+
 
 from bbox._1_dataset.dataset import SatelliteBBDataset
 from model import EventBBNet
@@ -43,7 +43,6 @@ GLOBAL_LAST_MODEL_STATE = None
 GLOBAL_LAST_OPTIMIZER_STATE = None
 GLOBAL_LAST_SCHEDULER_STATE = None
 GLOBAL_MODEL_DIR = ""
-
 
 
 ##################### YOLO-style loss (simplified for single-class) #####################
@@ -215,17 +214,17 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
 
         # Intersection area
         inter_wh = torch.min(pred_xy + pred_wh/2, gt_xy + gt_wh/2) - \
-                   torch.max(pred_xy - pred_wh/2, gt_xy - gt_wh/2)
-        inter_wh = torch.clamp(inter_wh, min=0.0)
-        inter_area = inter_wh[..., 0] * inter_wh[..., 1]
+                   torch.max(pred_xy - pred_wh/2, gt_xy - gt_wh/2) # [B, num_cells, K, 2]
+        inter_wh = torch.clamp(inter_wh, min=0.0) # [B, num_cells, K, 2]
+        inter_area = inter_wh[..., 0] * inter_wh[..., 1] # [B, num_cells, K]
 
         # Union area
         pred_area = pred_wh[..., 0] * pred_wh[..., 1]
         gt_area   = gt_wh[..., 0] * gt_wh[..., 1]
-        union_area = pred_area + gt_area - inter_area
+        union_area = pred_area + gt_area - inter_area # [B, num_cells, K]
 
         # IoU
-        iou = inter_area / (union_area + 1e-5)
+        iou = inter_area / (union_area + 1e-5) # [B, num_cells, K]
         iou = iou.clamp(min=0.0, max=1.0)
 
         # Center distance squared
@@ -245,18 +244,18 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
         v = v.clamp(min=0.0, max=1.0)
 
         # CIoU
-        alpha = v / ((1 - iou + v).clamp(min=1e-6))
-        alpha = alpha.clamp(min=0.0, max=1.0)
-        ciou = iou - (c2 / enclose_diag) - alpha * v
+        alpha = v / ((1 - iou + v).clamp(min=1e-6)) # [B, num_cells, K]
+        alpha = alpha.clamp(min=0.0, max=1.0) # [B, num_cells, K]
+        ciou = iou - (c2 / enclose_diag) - alpha * v # [B, num_cells, K]
 
         valid_mask = (pred_wh[..., 0] > 0) & (pred_wh[..., 1] > 0) & \
-             (gt_wh[..., 0] > 0) & (gt_wh[..., 1] > 0)
+             (gt_wh[..., 0] > 0) & (gt_wh[..., 1] > 0) # [B, num_cells, K]
         
         if not valid_mask.any():
             box_loss = torch.tensor(0.0, device=device, requires_grad=True)
         else:
-            ciou_loss = (1 - ciou) * box_mask.float() * valid_mask.float()
-            box_loss = ciou_loss.sum() / (box_mask & valid_mask).sum().clamp(min=1)
+            ciou_loss = (1 - ciou) * box_mask.float() * valid_mask.float() # [B, num_cells, K]
+            box_loss = ciou_loss.sum() / (box_mask & valid_mask).sum().clamp(min=1) # scalar
             # Mean over responsible cells
             # ciou_loss = (1 - ciou) * box_mask.float() # [B, num_cells, K]
             # box_loss = ciou_loss.sum() / box_mask.sum().clamp(min=1)
@@ -270,13 +269,13 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     # - 4.4 - Focal loss on class probability (same target as objectness but for multiple-class)
     cls_loss = focal_loss(pred_classes, target_classes, gamma=gamma_cls)
 
-    # - 4.5 - Class accuracy (for monitoring only, not used in loss)
+    # - 4.5 - Class accuracy (monitoring only): how many responsible cells have the max class_prob in the correct class
     pred_class_idx = pred_classes.argmax(dim=-1)  # [B, num_cells, K] values in [0, num_classes-1]
     correct = (pred_class_idx == target_class_id.view(B, 1, 1)) #[B, num_cells, K] boolean
     responsible_mask = target_obj > 0.01  # [B, num_cells, K] boolean
     correct_responsible = correct & responsible_mask  # [B, num_cells, K] boolean
     num_responsible = responsible_mask.sum().clamp(min=1)  # avoid div by zero [B, num_cells, K] scalar
-    class_acc = correct_responsible.float().sum() / num_responsible # scalar
+    class_acc = correct_responsible.sum() / num_responsible # scalar
     class_acc = class_acc.item()  # scalar
 
 
@@ -292,15 +291,30 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
 ##################### Focal Loss #####################
 def focal_loss(inputs, targets, gamma):
 
-    # bce: 0 for perfect prediction, inf for worst prediction
+    # Clamp before input to BCE loss
+    inputs  = inputs.clamp(min=1e-7, max=1 - 1e-7)   # probabilities must be strictly in (0,1)
+    targets = targets.clamp(min=0.0, max=1.0)        # targets also safe in [0,1]
+
+    # bce: 0 for perfect prediction, inf for worst prediction # [B, num_cells, K, x]
     # bce = nn.BCELoss(reduction='none')(inputs, targets)
-    bce = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+    bce = F.binary_cross_entropy(inputs, targets, reduction='none') # faster than previous line
+
+    # bce with logits: internal sigmoid
+    # bce = nn.BCEWithLogitsLoss(reduction='none')(inputs, targets)
+    # bce = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none') 
 
     # pt: 1 for perfect prediction, 0 for worst prediction
-    pt = torch.exp(-bce)
+    pt = torch.exp(-bce) # [B, num_cells, K, x]
+
+    # (1-pt): 0 for perfect prediction, 1 for worst prediction
+    # gamma: reduces loss for perfect predictions, increases loss for worst predictions
+    # higher gamma: stronger penalty on mistakes, almost ignores corrects
 
     # Focal loss: modulate BCE with (1-pt)^gamma
-    return ((1 - pt) ** gamma * bce).mean() / inputs.shape[0]
+    focal_loss = (1 - pt) ** gamma * bce # [B, num_cells, K, x]
+
+    return torch.mean(focal_loss)  # scalar: avg over all components
+
 
 ##################### Train one epoch #####################
 def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
@@ -317,16 +331,21 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         event, bbox, class_id = event.to(device), bbox.to(device), class_id.to(device)
         
         optimizer.zero_grad()
-        with autocast(device_type='cuda'):
-            pred = model(event)
-            loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
-        # loss.backward()
-        # optimizer.step()
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)  # important before clip
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
-        scaler.step(optimizer)
-        scaler.update()
+        # with autocast(device_type='cuda'):
+        pred = model(event)
+        
+        loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+        
+        # Backward and step
+        loss.backward()
+        optimizer.step()
+
+        # Backward and step with gradient clipping (uses scaler for this) 
+        # scaler.scale(loss).backward()
+        # scaler.unscale_(optimizer)  # important before clip
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        # scaler.step(optimizer)
+        # scaler.update()
         
         # TensorBoard batch logging
         global_step = epoch * len(loader) + batch_idx
@@ -337,8 +356,12 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         writer.add_scalar("Train/loss_batch/class_accuracy", class_acc, global_step)
 
         # TensorBoard log: max objectness confidence and class probability
-        max_obj = pred[..., 4].max().item()
-        max_cls = pred[..., 5:].max().item()
+        # max_obj = pred[..., 4].max().item()
+        max_obj_per_sample = torch.amax(pred[..., 4], dim=(1, 2, 3))  # [B]
+        max_obj = max_obj_per_sample.mean().item()  # scalar average over batch
+        # max_cls = pred[..., 5:].max().item()
+        max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3))  # [B]
+        max_cls = max_class_per_sample.mean().item()
         writer.add_scalar("Train/batch/max_obj_conf", max_obj, global_step)
         writer.add_scalar("Train/batch/max_class_prob", max_cls, global_step)
 
@@ -380,8 +403,10 @@ def validate(model, epoch, writer, loader, criterion, device):
             total_class_acc += class_acc
 
             # TensorBoard log: max objectness confidence and class probability
-            max_obj = pred[..., 4].max().item()
-            max_cls = pred[..., 5:].max().item()
+            max_obj_per_sample = torch.amax(pred[..., 4], dim=(1, 2, 3))  # [B]
+            max_obj = max_obj_per_sample.mean().item()  # scalar average over batch
+            max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3))  # [B]
+            max_cls = max_class_per_sample.mean().item()
 
             # TensorBoard batch logging
             global_step = epoch * len(loader) + batch_idx
@@ -461,7 +486,7 @@ def main(args):
     start_epoch = 1
 
     # Handle resume training
-    global GLOBAL_MODEL_DIR
+    global GLOBAL_MODEL_DIR, GLOBAL_BEST_VAL_LOSS
     if args.resume is None:
 
         # Create model directory with sequential numbering
@@ -537,6 +562,11 @@ def main(args):
 
         model.load_state_dict(cleaned_state)
 
+        # Load best val loss
+        if 'best_val_loss' in checkpoint:
+            best_val_loss = checkpoint['best_val_loss']
+            GLOBAL_BEST_VAL_LOSS = best_val_loss
+
         # Load hyperparameters
         if 'hyperparameters' in checkpoint:
             loaded_hp = checkpoint['hyperparameters']
@@ -561,10 +591,16 @@ def main(args):
         best_val_loss = checkpoint['best_val_loss']
         print(f"Resumed from epoch {start_epoch}, best val loss {best_val_loss:.6f}")
 
-    # Datasets & Loaders
-    train_ds = SatelliteBBDataset(split='train')
-    val_ds   = SatelliteBBDataset(split='val')
+    # Train Dataset & Loader
+    train_ds_full = SatelliteBBDataset(split='train')
+    np.random.seed(42)  # for reproducibility (optional)
+    num_samples = min(10000, len(train_ds_full)) # 10K -> around 25% of train data
+    random_indices = np.random.choice(len(train_ds_full), size=num_samples, replace=False)
+    train_ds = Subset(train_ds_full, random_indices)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+
+    # Val Dataset & Loader
+    val_ds   = SatelliteBBDataset(split='val')
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # Training loop
@@ -612,7 +648,6 @@ def main(args):
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
             best_val_loss = val_loss
-            global GLOBAL_BEST_VAL_LOSS
             GLOBAL_BEST_VAL_LOSS = best_val_loss
             epochs_no_improve = 0
             torch.save({
@@ -687,7 +722,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=10,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
@@ -695,12 +730,12 @@ if __name__ == "__main__":
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Training parameters
-    parser.add_argument("--batch_size",   type=int,   default=256,       help="Batch size")
+    parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=2000.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=6000.0,    help="Weight for class loss")
+    parser.add_argument("--w_obj",        type=float, default=500.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=200.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=2.0,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
