@@ -187,6 +187,7 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     target_classes[batch_idx, center_idx, :, target_class_id] = 1.0 # [B, gh*gw, K, num_classes]
 
 
+
     # ── 4. Compute losses ──
     # Box loss — only on responsible cells (where target_obj == 1)
     box_mask = target_obj > 0.5 # [B, num_cells, K] 
@@ -360,7 +361,7 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         max_obj_per_sample = torch.amax(pred[..., 4], dim=(1, 2, 3))  # [B]
         max_obj = max_obj_per_sample.mean().item()  # scalar average over batch
         # max_cls = pred[..., 5:].max().item()
-        max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3))  # [B]
+        max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3, 4))  # [B]
         max_cls = max_class_per_sample.mean().item()
         writer.add_scalar("Train/batch/max_obj_conf", max_obj, global_step)
         writer.add_scalar("Train/batch/max_class_prob", max_cls, global_step)
@@ -405,9 +406,9 @@ def validate(model, epoch, writer, loader, criterion, device):
             # TensorBoard log: max objectness confidence and class probability
             max_obj_per_sample = torch.amax(pred[..., 4], dim=(1, 2, 3))  # [B]
             max_obj = max_obj_per_sample.mean().item()  # scalar average over batch
-            max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3))  # [B]
+            max_class_per_sample = torch.amax(pred[..., 5:], dim=(1, 2, 3, 4))  # [B]
             max_cls = max_class_per_sample.mean().item()
-
+            
             # TensorBoard batch logging
             global_step = epoch * len(loader) + batch_idx
             writer.add_scalar("Val/loss_batch", loss.item(), global_step)
@@ -722,12 +723,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=10,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=19,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
-    resume_path = "bbox/yolo_replica/_2_train/runs/5/best_model.pth"
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
+    resume_path = "bbox/yolo_replica/_2_train/runs/21/best_model.pth"
+    parser.add_argument("--resume", type=str, default=resume_path, help="Path to checkpoint to resume from")
 
     # Training parameters
     parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")
@@ -735,9 +736,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
     parser.add_argument("--w_obj",        type=float, default=500.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=200.0,    help="Weight for class loss")
+    parser.add_argument("--w_cls",        type=float, default=50.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--gamma_cls",    type=float, default=2.0,     help="Focal loss gamma for class")
+    parser.add_argument("--gamma_cls",    type=float, default=0.5,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()

@@ -32,7 +32,7 @@ class SatellitePoseDataset(Dataset):
         distance: 'close' or 'far' (only in test with real data)
 
         """
-        self.root_dir = "_dataset/"
+        self.root_dir = "_dataset/fresh"
 
         # Define paths, depending on train / val / test
         if 'train' in split:

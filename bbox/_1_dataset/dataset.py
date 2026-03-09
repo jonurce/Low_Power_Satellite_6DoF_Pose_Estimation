@@ -39,7 +39,7 @@ class SatelliteBBDataset(Dataset):
 
         """
         
-        self.root_dir = "_dataset/"
+        self.root_dir = "_dataset/fresh"
         self.img_dirs = []
         self.label_dirs = []
 
