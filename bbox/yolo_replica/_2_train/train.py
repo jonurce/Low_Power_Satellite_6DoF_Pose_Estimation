@@ -727,18 +727,18 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
-    resume_path = "bbox/yolo_replica/_2_train/runs/21/best_model.pth"
-    parser.add_argument("--resume", type=str, default=resume_path, help="Path to checkpoint to resume from")
+    resume_path = "bbox/yolo_replica/_2_train/runs/22/checkpoint_XXX.pth"
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Training parameters
     parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=500.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=50.0,    help="Weight for class loss")
+    parser.add_argument("--w_obj",        type=float, default=5000.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=5000.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--gamma_cls",    type=float, default=0.5,     help="Focal loss gamma for class")
+    parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()
