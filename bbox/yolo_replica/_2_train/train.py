@@ -593,11 +593,11 @@ def main(args):
         print(f"Resumed from epoch {start_epoch}, best val loss {best_val_loss:.6f}")
 
     # Train Dataset & Loader
-    train_ds_full = SatelliteBBDataset(split='train')
-    np.random.seed(42)  # for reproducibility (optional)
-    num_samples = min(10000, len(train_ds_full)) # 10K -> around 25% of train data
-    random_indices = np.random.choice(len(train_ds_full), size=num_samples, replace=False)
-    train_ds = Subset(train_ds_full, random_indices)
+    train_ds = SatelliteBBDataset(split='train')
+    # np.random.seed(42)  # for reproducibility (optional)
+    # num_samples = min(2000, len(train_ds_full)) # 2K -> around 5% of train data (40K total images)
+    # random_indices = np.random.choice(len(train_ds_full), size=num_samples, replace=False)
+    # train_ds = Subset(train_ds_full, random_indices)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
 
     # Val Dataset & Loader
@@ -723,7 +723,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=19,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=24,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
@@ -735,7 +735,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
     parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=5000.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_obj",        type=float, default=50000.0,    help="Weight for objectness loss")
     parser.add_argument("--w_cls",        type=float, default=5000.0,    help="Weight for class loss")
     parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
     parser.add_argument("--gamma_cls",    type=float, default=1.0,     help="Focal loss gamma for class")
