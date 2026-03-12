@@ -50,13 +50,14 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     """
     YOLO-style loss, single-object-per-image detection.
     
-    pred:   [B, gh, gw, K, 8]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf + x3 class_prob
+    pred:   [B, gh, gw, K, 15]    [cx_offset, cy_offset, w, h] normalized [0,1] relative to each cell + obj_conf + x10 class_prob
 
     target: [B, 4]            [cx, cy, w, h] normalized [0,1] relative to image
 
-    target_class_id: [B]       class index (0-cassini, 1-satty, or 2-soho)
+    target_class_id: [B]       class index (0...9)
 
     """
+
     B, gh, gw, K, _ = pred.shape
     device = pred.device
 
@@ -328,24 +329,17 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
     running_loss = 0.0
 
     for batch_idx, (rgb, target) in enumerate(tqdm(loader, desc="Training")):
-        rgb = rgb.to(device)
+        rgb, target = rgb.to(device), target.to(device)
 
-        # Extract bbox and class_id for each image
-        bboxes = []
-        class_ids = []
-        for t in target:  # loop over batch
-            if t.numel() == 0:
-                bboxes.append(torch.empty((0, 4), device=device))
-                class_ids.append(torch.empty((0,), dtype=torch.long, device=device))
-            else:
-                bboxes.append(t[:, :4].to(device))      # [N, 4] cx,cy,w,h
-                class_ids.append(t[:, 4].long().to(device))  # [N] class indices
+        # target shape: [B, 1, 5] (fixed 1 object per image)
+        bbox     = target[:, 0, :4]      # [B, 4]  (squeeze dim 1)
+        class_id = target[:, 0, 4].int()       # [B]     (squeeze dim 1)
         
         optimizer.zero_grad()
         # with autocast(device_type='cuda'):
         pred = model(rgb)
         
-        loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bboxes, class_ids, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+        loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
         
         # Backward and step
         loss.backward()
@@ -404,22 +398,15 @@ def validate(model, epoch, writer, loader, criterion, device):
 
     with torch.no_grad():
         for batch_idx, (rgb, target) in enumerate(tqdm(loader, desc="Validation")):
-            
-            rgb = rgb.to(device)
 
-            # Extract bbox and class_id for each image
-            bboxes = []
-            class_ids = []
-            for t in target:  # loop over batch
-                if t.numel() == 0:
-                    bboxes.append(torch.empty((0, 4), device=device))
-                    class_ids.append(torch.empty((0,), dtype=torch.long, device=device))
-                else:
-                    bboxes.append(t[:, :4].to(device))      # [N, 4] cx,cy,w,h
-                    class_ids.append(t[:, 4].long().to(device))  # [N] class indices
-            
+            rgb, target = rgb.to(device), target.to(device)
+
+            # target shape: [B, 1, 5] (fixed 1 object per image)
+            bbox     = target[:, 0, :4]      # [B, 4]  (squeeze dim 1)
+            class_id = target[:, 0, 4].int()       # [B]     (squeeze dim 1)
+
             pred = model(rgb)
-            loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bboxes, bboxes, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
+            loss, box_loss, obj_loss, cls_loss, class_acc = criterion(pred, bbox, class_id, w_box=args.w_box, w_obj=args.w_obj, w_cls=args.w_cls, gamma_obj=args.gamma_obj, gamma_cls=args.gamma_cls, sigma=args.sigma)
             total_loss += loss.item()
             total_box += box_loss.item()
             total_obj += obj_loss.item()
@@ -527,7 +514,7 @@ def main(args):
         details_path = os.path.join(GLOBAL_MODEL_DIR, "details.txt")
         with open(details_path, "w") as f:
             f.write(f"Bounding Box Training Run\n")
-            f.write(f"Multi-class (satellites), event-only input\n")
+            f.write(f"Multi-class (animals), RGB input\n")
             f.write(f"-------------------------\n")
             f.write(f"Model Info:\n")
             f.write(f"Total parameters: {total_params:,}\n")
@@ -540,13 +527,12 @@ def main(args):
             f.write(f"Loss weights:    w_box={args.w_box}, w_obj={args.w_obj}, w_cls={args.w_cls}\n")
             f.write(f"Focal loss gamma: gamma_obj={args.gamma_obj}, gamma_cls={args.gamma_cls}\n")
             f.write(f"Sigma for soft targets: {args.sigma}\n")
-            f.write(f"Notes: Giving more importance to prob_obj and prob_cls (ensure they don't go to 0)\n")
 
         # TensorBoard
         writer = SummaryWriter(log_dir=GLOBAL_MODEL_DIR)
 
         # Log model graph
-        dummy_event = torch.randn(1, 1, 720, 800).to(device)
+        dummy_event = torch.randn(1, 3, 720, 800).to(device)
         writer.add_graph(model, dummy_event)
 
         # Multi-GPU (after graph, so it does not crash)
@@ -742,22 +728,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Event-only Bounding Box Network")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
-    parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
+    parser.add_argument("--start_count",   type=int,   default=6,       help="Starting count for model directory naming")
+    parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train_animals/runs", help="Save directory")
 
     # Resume directory: resume_path or None
-    resume_path = "bbox/yolo_replica/_2_train_animals/runs/21/best_model.pth"
+    resume_path = "bbox/yolo_replica/_2_train_animals/runs/XX/interrupted_epoch_XX.pth"
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Training parameters
-    parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")
+    parser.add_argument("--batch_size",   type=int,   default=8,       help="Batch size")
     parser.add_argument("--epochs",       type=int,   default=500,      help="Number of epochs")
     parser.add_argument("--lr",           type=float, default=3e-4,     help="Learning rate")
-    parser.add_argument("--w_box",        type=float, default=10.0,      help="Weight for box loss")
-    parser.add_argument("--w_obj",        type=float, default=500.0,    help="Weight for objectness loss")
-    parser.add_argument("--w_cls",        type=float, default=50.0,    help="Weight for class loss")
-    parser.add_argument("--gamma_obj",    type=float, default=1.0,     help="Focal loss gamma for objectness")
-    parser.add_argument("--gamma_cls",    type=float, default=0.5,     help="Focal loss gamma for class")
+    parser.add_argument("--w_box",        type=float, default=100.0,      help="Weight for box loss")
+    parser.add_argument("--w_obj",        type=float, default=1000.0,    help="Weight for objectness loss")
+    parser.add_argument("--w_cls",        type=float, default=100.0,    help="Weight for class loss")
+    parser.add_argument("--gamma_obj",    type=float, default=0.8,     help="Focal loss gamma for objectness")
+    parser.add_argument("--gamma_cls",    type=float, default=0.8,     help="Focal loss gamma for class")
     parser.add_argument("--sigma",        type=float, default=0.6,     help="Sigma for Gaussian soft targets")
     
     args = parser.parse_args()

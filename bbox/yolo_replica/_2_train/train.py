@@ -727,8 +727,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir",     type=str,   default="bbox/yolo_replica/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
-    resume_path = "bbox/yolo_replica/_2_train/runs/22/checkpoint_XXX.pth"
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
+    resume_path = "bbox/yolo_replica/_2_train/runs/28/checkpoint_epoch_40.pth"
+    parser.add_argument("--resume", type=str, default=resume_path, help="Path to checkpoint to resume from")
 
     # Training parameters
     parser.add_argument("--batch_size",   type=int,   default=128,       help="Batch size")

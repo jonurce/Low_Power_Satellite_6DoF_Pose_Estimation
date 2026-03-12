@@ -1,0 +1,22 @@
+Bounding Box Training Run
+Multi-class (animals), RGB input
+-------------------------
+Model Info:
+Total parameters: 5,173,773
+Trainable parameters: 5,173,773
+-------------------------
+Batch size:      128
+Max epochs:      500
+Learning rate:   0.0003
+Device:          x2 NVIDIA GeForce RTX 3090 Ti
+Loss weights:    w_box=50000.0, w_obj=200000.0, w_cls=500000.0
+Focal loss gamma: gamma_obj=0.5, gamma_cls=0.5
+Sigma for soft targets: 0.6
+-------------------------
+Results (interrupted):
+Final epoch: 195
+Best val loss: 40814.857422
+Last val loss: 40902.419922
+Last train loss: 37986.560937
+Last val box loss: 0.438501
+Stopped at epoch 195

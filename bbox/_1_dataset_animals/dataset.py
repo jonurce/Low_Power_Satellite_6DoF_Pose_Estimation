@@ -48,7 +48,27 @@ class AnimalsBBDataset(Dataset):
         if not self.img_files:
             raise FileNotFoundError(f"No images found in {self.img_dir}")
         
-        
+        # Keep only images that have at least one of these classes
+        self.keep_classes = {0, 3, 5}  # cat, dog, goat
+
+        filtered_files = []
+        for img_path in self.img_files:
+            label_path = Path(self.label_dir) / (img_path.stem + '.txt')
+            if not label_path.exists():
+                continue
+            with open(label_path, 'r') as f:
+                lines = f.readlines()
+                has_kept_class = False
+                for line in lines:
+                    if line.strip():
+                        has_kept_class = int(line.split()[0]) in self.keep_classes
+                    break
+            if has_kept_class:
+                filtered_files.append(img_path)
+
+        self.img_files = filtered_files
+        print(f"Filtered to {len(self.img_files)} images containing cat, dog, or goat in {split}")
+    
         # Only transform if split is train (separate for rgb and event frames)
         if split == 'train':
             self.transform = A.Compose([
@@ -105,12 +125,25 @@ class AnimalsBBDataset(Dataset):
         image = transformed['image']   # [C, H, W] tensor
         bboxes = np.array(transformed['bboxes']) if transformed['bboxes'].any() else np.empty((0, 4))
         labels = np.array(transformed['class_labels']) if transformed['class_labels'].any() else np.empty((0,))
-        
-        # Convert to YOLO target format: [cx, cy, w, h, class] or separate tensors
-        if len(bboxes) > 0:
-            target = np.hstack([bboxes, labels[:, None]])  # [N, 5]
-            target = torch.from_numpy(target).float()
+
+        # original IDs → new IDs: chicken=0, cow=1, person=2
+        class_map = {0: 0, 3: 1, 5: 2}  
+        labels = np.array([class_map.get(int(cls), -1) for cls in class_labels])
+        labels = labels[labels >= 0]  # remove any unmapped (shouldn't happen)
+
+        # Convert to fixed YOLO target format: always [1, 5] (cx, cy, w, h, class)
+        if len(bboxes) > 0 and len(labels) > 0:
+
+            # Take all objects
+            # target = np.hstack([bboxes, labels[:, None]])  # [N, 5]
+
+            # Take only the first object
+            first_bbox = bboxes[0]          # [cx, cy, w, h]
+            first_class = labels[0]         # scalar
+            target = np.array([first_bbox[0], first_bbox[1], first_bbox[2], first_bbox[3], first_class])
+            target = torch.from_numpy(target).float().unsqueeze(0)  # [1, 5]
         else:
-            target = torch.empty((0, 5), dtype=torch.float32)
+            # No objects → return dummy zero box with invalid class (-1)
+            target = torch.tensor([[0.0, 0.0, 0.0, 0.0, -1.0]], dtype=torch.float32)  # [1, 5]
 
         return image / 255.0, target

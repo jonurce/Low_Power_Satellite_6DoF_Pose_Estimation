@@ -12,7 +12,7 @@ test_ds = AnimalsBBDataset(split='test')
 
 print(f"Train samples: {len(train_ds)}, Val samples: {len(val_ds)}, Test samples: {len(test_ds)}")
 
-for idx in range (5):
+for idx in range (0):
     # 2. Pick one sample from each
     rgb_train,  target_train = train_ds[idx]
     rgb_val, target_valid = val_ds[idx]

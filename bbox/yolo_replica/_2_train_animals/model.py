@@ -62,15 +62,15 @@ class RGBbboxNet(nn.Module):
     """
     Simple from-scratch CNN for bounding box regression on event images.
     Input: RGB (3, H, W) normalized [0,1]
-    Output: YOLO-like grid predictions [B, grid_h, grid_w, num_anchors, 8]
-           where 8 = [cx, cy, w, h, obj_conf, class_0_prob, class_1_prob, class_2_prob],
+    Output: YOLO-like grid predictions [B, grid_h, grid_w, num_anchors, 15]
+           where 15 = [cx, cy, w, h, obj_conf, class_0_prob, ... class_9_prob],
            and class_prob {0: 'cat', 1: 'chicken', 2: 'cow', 3: 'dog', 4: 'fox', 5: 'goat',
                    6: 'horse', 7: 'person', 8: 'racoon', 9: 'skunk'}
     """
     def __init__(self, base_channels=32, K=3, num_classes=3):
         super().__init__()
 
-        # Event backbone (1 input channel)
+        # Event backbone (3 input channel)
         self.backbone_simple = nn.Sequential(
             SimpleConvBlock(3,   base_channels,     pool=True),   # → /2
             SimpleConvBlock(base_channels,   base_channels*2,   pool=True),
@@ -82,7 +82,7 @@ class RGBbboxNet(nn.Module):
         # Improved backbone with residuals and SPPF
         self.backbone_stages = nn.Sequential(
             # Stage 1: downsample + CSP block
-            nn.Conv2d(1, base_channels, 3, stride=2, padding=1, bias=False),  # /2
+            nn.Conv2d(3, base_channels, 3, stride=2, padding=1, bias=False),  # /2
             nn.BatchNorm2d(base_channels),
             nn.ReLU(),
             ResidualBlock(base_channels),
@@ -126,9 +126,10 @@ class RGBbboxNet(nn.Module):
         # Number of predictions per grid cell
         self.K = K 
         self.num_classes = num_classes 
+        self.num_predictions = 4 + 1 + num_classes # 4 box params + 1 obj_conf + num_classes class probs
 
         # Output: a list of K elements, each being (5 + num_class): cx, cy, w, h, obj_conf, class_prob_0 ... class_prob_(num_class-1)
-        self.head_out_channels = K * (4 + 1 + num_classes)  # 4 box params + 1 obj_conf + num_classes class probs
+        self.head_out_channels = K * self.num_predictions  
         
         # Detection head
         self.head = nn.Conv2d(
@@ -141,10 +142,8 @@ class RGBbboxNet(nn.Module):
 
         # Bias for obj_conf & class_prob → start with higher logit: logit(0.99995) ≈ 4.0
         for k in range(self.K):
-            nn.init.constant_(self.head.bias[4 + k * (4 + 1 + num_classes)], 10.0) 
-            nn.init.constant_(self.head.bias[5 + k * (4 + 1 + num_classes)], 10.0) 
-            nn.init.constant_(self.head.bias[6 + k * (4 + 1 + num_classes)], 10.0)
-            nn.init.constant_(self.head.bias[7 + k * (4 + 1 + num_classes)], 10.0)
+            for index in range(4, self.num_predictions, 1):
+                nn.init.constant_(self.head.bias[index + k * (self.num_predictions)], 10.0) 
 
     def forward(self, event):
         # Feature extraction: [B, C, H, W] -> [B, C*16, H/32, W/32]
@@ -170,26 +169,26 @@ class RGBbboxNet(nn.Module):
         # Get shape values from [B, K*8, H/32, W/32]
         B, C, gh, gw = pred.shape
 
-        # Reshape to [B, K, 8, gh, gw]
-        pred = pred.view(B, self.K, (4 + 1 + self.num_classes), gh, gw) 
+        # Reshape to [B, K, 15, gh, gw]
+        pred = pred.view(B, self.K, self.num_predictions, gh, gw) 
 
-        # Reshape from [B, K, 8, gh, gw] → [B, gh, gw, K, 8]
+        # Reshape from [B, K, 15, gh, gw] → [B, gh, gw, K, 15]
         pred = pred.permute(0, 3, 4, 1, 2).contiguous() 
 
-        # Selective activation: [B, gh, gw, K, 8] -> [B, gh, gw, K, 8]
+        # Selective activation: [B, gh, gw, K, 15] -> [B, gh, gw, K, 15]
         pred[..., 0:2] = torch.sigmoid(pred[..., 0:2])          # cx, cy → [0,1] (dim=-1)
         pred[..., 2:4] = torch.exp(pred[..., 2:4])              # w, h → positive & can be >>1
         pred[..., 4]  = torch.sigmoid(pred[..., 4])             # obj_conf → [0,1]
         pred[..., 5:] = torch.softmax(pred[..., 5:], dim=-1)    # class_prob → [0,1] sum to 1
 
-        # Prediction: [B, gh, gw, K, 8] (for each grid -> K*8)
+        # Prediction: [B, gh, gw, K, 15] (for each grid -> K*15)
         return pred
 
 
 # Quick test / usage example
 if __name__ == "__main__":
     model = RGBbboxNet()
-    event = torch.randn(2, 1, 720, 800)
+    event = torch.randn(2, 3, 800, 800)
     out = model(event)
-    print("Output shape:", out.shape)          # e.g. [2, 40, 40, 6]
+    print("Output shape:", out.shape) 
     print("Sample output min/max:", out.min().item(), out.max().item())
