@@ -66,13 +66,22 @@ unzip _downloads/animals.zip    -d _dataset/animals
 
 cd _downloads
 
-mkdir imagenet
-
-cd imagenet
-
 wget -O imagenet.zip "https://www.kaggle.com/competitions/imagenet-object-localization-challenge/download-directory/BfknyVadERJfaqszLb7Z%2Fversions%2F4q0p1zUqWPJWgWXDucL0%2Fdirectories%2FILSVRC"
 
 cd ..
 
 unzip _downloads/imagenet.zip    -d _dataset/imagenet
+
+## 4. Download ImageNet dataset
+cd _downloads
+
+wget "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+
+cd ..
+
+mkdir _dataset/cifar10
+
+tar -xzvf _downloads/cifar-10-python.tar.gz -C _dataset/cifar10
+
+
 

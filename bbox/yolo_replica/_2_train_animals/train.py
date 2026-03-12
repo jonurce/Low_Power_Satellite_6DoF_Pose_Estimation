@@ -26,7 +26,9 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
 scaler = GradScaler()
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Rectangle
 
 
 from bbox._1_dataset_animals.dataset import AnimalsBBDataset
@@ -70,7 +72,7 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     pred_classes = pred[..., :, 5:]  # class probs [0,1]
 
     # Reshape to [B, gh*gw, K, 6] for easier matching
-    pred_boxes = torch.stack([pred_cx, pred_cy, pred_w, pred_h], dim=-1)  # [B, gh, gw, K, 4]
+    pred_boxes = torch.stack([pred_cx, pred_cy, pred_w, pred_h], dim=-1)     # [B, gh, gw, K, 4]
     pred_boxes = pred_boxes.view(B, -1, K, 4)                                # [B, num_cells, K, 4]
     pred_obj   = pred_obj.view(B, -1, K)                                     # [B, num_cells, K]
     pred_classes   = pred_classes.view(B, -1, K, pred_classes.shape[-1])     # [B, num_cells, K, num_classes]
@@ -83,10 +85,10 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     cell_x = (target[:, 0] * gw).floor().long().clamp(0, gw - 1)   # [0, gw-1] [B]
     cell_y = (target[:, 1] * gh).floor().long().clamp(0, gh - 1)   # [0, gh-1] [B]
 
-    gt_cx = target[:, 0] * gw  - cell_x
-    gt_cy = target[:, 1] * gh  - cell_y
-    gt_w = target[:, 2] * gw    
-    gt_h = target[:, 3] * gh   
+    gt_cx = target[:, 0] * gw  - cell_x # [B]
+    gt_cy = target[:, 1] * gh  - cell_y # [B]
+    gt_w = target[:, 2] * gw # [B]
+    gt_h = target[:, 3] * gh # [B]
 
     # Create target boxes (broadcast to all cells, but loss only on responsible)
     target_boxes = torch.stack([gt_cx, gt_cy, gt_w, gt_h], dim=1)  # [B, 4]
@@ -181,7 +183,15 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     # Optional: force 1.0 exactly at center cell (strongest supervision)
     center_idx = cell_y * gw + cell_x
     batch_idx = torch.arange(B, device=device)
-    target_obj[batch_idx, center_idx, :] = 1.0
+    target_obj[batch_idx, center_idx, :] = 1.0 # [B, gh*gw, K]
+
+    # Visualize target_obj
+    visualize_target_obj(
+        target_obj,
+        target_boxes, 
+        B=B, gh=gh, gw=gw, K=K,
+        save_dir=os.path.join(GLOBAL_MODEL_DIR, "visualizations"),
+    )
 
     # Set 1.0 and soft value for the correct class in responsible cells
     target_classes[batch_idx[:, None], torch.arange(gh*gw)[None, :], :, target_class_id[:, None]] = soft_target.view(B, -1, K)
@@ -289,6 +299,52 @@ def yolo_loss(pred, target, target_class_id, w_box, w_obj, w_cls, gamma_obj, gam
     total_loss = w_box * box_loss + w_obj * obj_loss + w_cls * cls_loss
 
     return total_loss, box_loss, obj_loss, cls_loss, class_acc
+
+
+##################### Visualize Target Obj #####################
+def visualize_target_obj(target_obj, target_boxes, B, gh, gw, K, save_dir=None):
+    """
+    Plots target_obj for the first batch sample and first K prediction, with the GT bbox overlaid in red.
+    
+    target_obj: torch.Tensor [B, gh*gw, K] with values [0,1]
+    Saves a single grayscale image (gh × gw): 0=black, 1=white
+
+    target_boxes: torch.Tensor [B, num_cells, K, 4] (gt cx, cy, w, h) normalized to cell
+    """
+    # Take first sample and first K
+    obj_first = target_obj[0, :, 0].detach().cpu().numpy()  # [gh*gw]
+    
+    # Reshape back to grid
+    obj_grid = obj_first.reshape(gh, gw)  # [gh, gw]
+
+    # Get GT bbox for first batch sample (normalized [0,1])
+    gt_bbox = target_boxes[0, 0, 0].detach().cpu().numpy()  # [cx, cy, w, h]
+    cx, cy, w, h = gt_bbox
+
+    # Convert bbox to pixel coordinates
+    x1 = int(cx - w/2)
+    y1 = int(cy - h/2)
+    x2 = int(cx + w/2)
+    y2 = int(cy + h/2)
+    
+    # Plot grayscale
+    plt.figure(figsize=(6, 6))
+    plt.imshow(obj_grid, cmap='gray', vmin=0, vmax=1)
+    rect = Rectangle((x1, y1), w, h, linewidth=2, edgecolor='red', facecolor='none')
+    plt.gca().add_patch(rect)
+    plt.title(f"Target Obj - Batch 0, K=0 (GT bbox in red)")
+    plt.axis('off')
+    plt.colorbar(label='Objectness target [0,1]')
+    
+    # Save
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        fname = "target_obj_first_batch_k0.png"
+        plt.savefig(os.path.join(save_dir, fname), dpi=150, bbox_inches='tight')
+    
+    plt.show()
+    plt.close()
+    exit()
 
 ##################### Focal Loss #####################
 def focal_loss(inputs, targets, gamma):
