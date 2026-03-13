@@ -22,7 +22,9 @@ class CIFAR10Dataset(Dataset):
         self.root = root
         
         if split == 'train':
-            self.transform = T.Compose([
+
+            # Original transform
+            self.transform_original = T.Compose([
                 # Random scaling and translation up to 20% of image size
                 T.RandomAffine(
                     degrees=0,                    # no rotation
@@ -43,6 +45,42 @@ class CIFAR10Dataset(Dataset):
                 
                 T.ToTensor(),
             ])
+
+            # Improved transform
+            self.transform = T.Compose([
+                # Random scaling and translation up to 20%
+                T.RandomAffine(
+                    degrees=0,
+                    translate=(0.2, 0.2),
+                    scale=(0.8, 1.2),
+                    shear=0,
+                    interpolation=T.InterpolationMode.BILINEAR,
+                    fill=0
+                ),
+                
+                # Stronger exposure/saturation + add contrast & small hue
+                T.ColorJitter(
+                    brightness=(0.5, 1.5),     # wider range: 0.5× to 1.5×
+                    contrast=(0.7, 1.3),       # add mild contrast jitter
+                    saturation=(0.5, 1.5),     # wider saturation range
+                    hue=(-0.05, 0.05)          # small hue shift (safe on CIFAR)
+                ),
+                
+                # Add random horizontal flip (very effective on CIFAR)
+                T.RandomHorizontalFlip(p=0.5),
+
+                T.ToTensor(),
+                
+                # Add random erasing (cutout) – huge gain on CIFAR
+                T.RandomErasing(
+                    p=0.4,                     # probability
+                    scale=(0.02, 0.25),        # erase 2–25% of area
+                    ratio=(0.3, 3.3),          # aspect ratio range
+                    value="random"             # random pixel values
+                ),
+                
+            ])
+
         else:
             self.transform = T.Compose([
                 T.ToTensor(),

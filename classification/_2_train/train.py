@@ -112,6 +112,7 @@ def save_on_interrupt():
                 'batch_size': args.batch_size,
                 'epochs': args.epochs,
                 'lr': args.lr,
+                'wd': args.wd,
             }
         }, interrupt_path)
         print(f"Saved interrupted model: {interrupt_path}")
@@ -179,6 +180,7 @@ def main(args):
             f.write(f"Batch size:      {args.batch_size}\n")
             f.write(f"Max epochs:      {args.epochs}\n")
             f.write(f"Learning rate:   {args.lr}\n")
+            f.write(f"Weight decay:   {args.wd}\n")
             f.write(f"Device:          x{torch.cuda.device_count()} {torch.cuda.get_device_name(0)}\n")
 
         # TensorBoard
@@ -193,7 +195,7 @@ def main(args):
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
             model = torch.compile(model)
-            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=6e-5)
+            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
     else:
@@ -245,7 +247,7 @@ def main(args):
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
             model = torch.compile(model)
-            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=6e-5)
+            optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -304,6 +306,7 @@ def main(args):
                     'batch_size': args.batch_size,
                     'epochs': args.epochs,
                     'lr': args.lr,
+                    'wd': args.wd,
                 }
             }, os.path.join(GLOBAL_MODEL_DIR, "best_model.pth"))
             print(f"→ Improved! Saved best model (val_loss: {val_loss:.6f})")
@@ -326,6 +329,7 @@ def main(args):
                     'batch_size': args.batch_size,
                     'epochs': args.epochs,
                     'lr': args.lr,
+                    'wd': args.wd,
                 }
             }, os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch}.pth"))
             prev_path = os.path.join(GLOBAL_MODEL_DIR, f"checkpoint_epoch_{epoch - 5}.pth")
@@ -361,6 +365,7 @@ if __name__ == "__main__":
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--lr", type=float, default=1.5e-3)
+    parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--wd", type=float, default=6e-5)
     args = parser.parse_args()
     main(args)
