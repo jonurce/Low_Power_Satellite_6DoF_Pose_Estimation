@@ -7,11 +7,11 @@ Trainable parameters: 64,405,588
 -------------------------
 Batch size:      1024
 Max epochs:      1000
-Learning rate:   0.001
+Learning rate:   0.002
 Device:          x2 NVIDIA GeForce RTX 3090 Ti
 -------------------------
 Results:
-Final epoch: 234
-Best val loss: 0.694564
-Last val loss: 0.754007
+Final epoch: 207
+Best val loss: 0.679765
+Last val loss: 0.753216
 Early stopping triggered
