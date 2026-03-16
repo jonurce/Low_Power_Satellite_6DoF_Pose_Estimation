@@ -87,6 +87,7 @@ class YOLOv1Classifier(nn.Module):
         # x: [B, 3, 32, 32]
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
         logits = self.head_classification(features)       # → [B, 10]
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
         return logits
     
     def get_probs(self, x, temperature=1.0):

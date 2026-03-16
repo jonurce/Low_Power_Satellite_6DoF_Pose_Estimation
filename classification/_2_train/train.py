@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, CosineAnnealingWarmRestarts, LambdaLR, OneCycleLR
 from tqdm import tqdm
 import os
 import argparse
@@ -24,12 +24,14 @@ GLOBAL_LAST_VAL_LOSS = float('inf')
 GLOBAL_LAST_TRAIN_LOSS = 0.0
 GLOBAL_LAST_MODEL_STATE = None
 GLOBAL_LAST_OPTIMIZER_STATE = None
+# GLOBAL_LAST_WARMUP_SCHEDULER_STATE = None
 GLOBAL_LAST_SCHEDULER_STATE = None
 GLOBAL_MODEL_DIR = ""
+GLOBAL_WARMUP_EPOCHS = 10
 
 
 ##################### Train one epoch #####################
-def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
+def train_one_epoch(model, epoch, writer, loader, optimizer, scheduler, criterion, device):
     model.train()
     total_loss = 0.0
     total_correct = 0
@@ -42,10 +44,20 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, criterion, device):
         optimizer.zero_grad()
         with autocast(device_type='cuda'):
             logits = model(images)  # [B, 10]
-            loss = criterion(logits, labels)
+            loss = criterion(logits.float(), labels)
 
-        loss.backward()
-        optimizer.step()
+        # loss.backward()
+        # optimizer.step()
+        
+        # Backward and step with gradient clipping (uses scaler for this) 
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)  # important before clip
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        scaler.step(optimizer)
+        scaler.update()
+
+        # Scheduler step per batch for OneCycleLR
+        # scheduler.step()
 
         # Metrics
         pred = logits.argmax(dim=1)
@@ -77,7 +89,7 @@ def validate(model, epoch, writer, loader, criterion, device):
         for batch_idx, (images, labels) in enumerate(tqdm(loader, desc="Validation")):
             images, labels = images.to(device), labels.to(device)
             logits = model(images)
-            loss = criterion(logits, labels)
+            loss = criterion(logits.float(), labels)
 
             pred = logits.argmax(dim=1)
             correct = (pred == labels).sum().item()
@@ -106,6 +118,7 @@ def save_on_interrupt():
             'epoch': GLOBAL_LAST_EPOCH,
             'model_state_dict': GLOBAL_LAST_MODEL_STATE,
             'optimizer_state_dict': GLOBAL_LAST_OPTIMIZER_STATE,
+            # 'warmup_scheduler_state_dict': GLOBAL_LAST_WARMUP_SCHEDULER_STATE,
             'scheduler_state_dict': GLOBAL_LAST_SCHEDULER_STATE,
             'best_val_loss': GLOBAL_LAST_VAL_LOSS,
             'hyperparameters': {
@@ -130,8 +143,14 @@ def save_on_interrupt():
     
     sys.exit(0)
 
-# ##################### Register handler #####################
+###################### Register handler #####################
 signal.signal(signal.SIGINT, save_on_interrupt)
+
+###################### Warmup Lambda #####################
+def warmup_lambda(epoch):
+    if epoch < GLOBAL_WARMUP_EPOCHS:
+        return float(epoch) / float(max(1, GLOBAL_WARMUP_EPOCHS))
+    return 1.0
 
 ##################### Main #####################
 def main(args):
@@ -153,8 +172,13 @@ def main(args):
     epochs_no_improve = 0
     start_epoch = 1
 
+    # Datasets
+    train_ds = CIFAR10Dataset(split='train')
+    val_ds   = CIFAR10Dataset(split='test')
+
     # Handle resume training
-    global GLOBAL_MODEL_DIR, GLOBAL_BEST_VAL_LOSS
+    global GLOBAL_MODEL_DIR, GLOBAL_BEST_VAL_LOSS, GLOBAL_WARMUP_EPOCHS
+    GLOBAL_WARMUP_EPOCHS = args.warmup_epochs
     if args.resume is None:
 
         # Create model directory with sequential numbering
@@ -190,13 +214,21 @@ def main(args):
         dummy_event = torch.randn(1, 3, 32, 32).to(device)
         writer.add_graph(model, dummy_event)
 
+        # Data Loaders
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+        val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
         # Multi-GPU (after graph, so it does not crash)
         if torch.cuda.device_count() > 1:
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
             model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+            # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15, min_lr=args.lr/20)
+            # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
+            # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
+            #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
 
     else:
 
@@ -242,30 +274,35 @@ def main(args):
         else:
             print("No hyperparameters found in checkpoint — using current args")
 
+        # Data Loaders
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+        val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+        
         # Multi-GPU (after graph, so it does not crash)
         if torch.cuda.device_count() > 1:
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
             model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+            
+            # GLOBAL_WARMUP_EPOCHS = args.warmup_epochs
+            # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=15, min_lr=args.lr/20)
+            # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
+            # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
+            #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            # warmup_scheduler.load_state_dict(checkpoint['warmup_scheduler_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['best_val_loss']
         print(f"Resumed from epoch {start_epoch}, best val loss {best_val_loss:.6f}")
 
-    # Datasets & Loaders
-    train_ds = CIFAR10Dataset(split='train')
-    val_ds   = CIFAR10Dataset(split='test')
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
-
     # Training loop
     for epoch in range(args.epochs):
 
-        train_loss, train_acc = train_one_epoch(model, epoch, writer, train_loader, optimizer, criterion, device)
+        train_loss, train_acc = train_one_epoch(model, epoch, writer, train_loader, optimizer, scheduler, criterion, device)
        
         val_loss, val_acc = validate(model, epoch, writer, val_loader, criterion, device)
 
@@ -287,9 +324,17 @@ def main(args):
 
         GLOBAL_LAST_MODEL_STATE = model.state_dict()
         GLOBAL_LAST_OPTIMIZER_STATE = optimizer.state_dict()
+        # GLOBAL_LAST_WARMUP_SCHEDULER_STATE = warmup_scheduler.state_dict()
         GLOBAL_LAST_SCHEDULER_STATE = scheduler.state_dict()
 
+        # Scheduler step per epoch for ReduceLROnPlateau
         scheduler.step(val_loss)
+
+        # Scheduler step per epoch with warmup for warmup + cosine scheduler
+        # if epoch < GLOBAL_WARMUP_EPOCHS:
+        #     warmup_scheduler.step()
+        # else:
+        #     scheduler.step()
 
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
@@ -300,6 +345,7 @@ def main(args):
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                # 'warmup_scheduler_state_dict': warmup_scheduler.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'best_val_loss': best_val_loss,
                 'hyperparameters': {
@@ -323,6 +369,7 @@ def main(args):
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                # 'warmup_scheduler_state_dict': warmup_scheduler.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'best_val_loss': val_loss,
                 'hyperparameters': {
@@ -355,7 +402,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train YOLOv1-style Classifier on CIFAR-10")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
+    parser.add_argument("--start_count",   type=int,   default=23,       help="Starting count for model directory naming")
     parser.add_argument("--save_dir",     type=str,   default="classification/_2_train/runs", help="Save directory")
 
     # Resume directory: resume_path or None
@@ -364,8 +411,9 @@ if __name__ == "__main__":
 
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--warmup_epochs", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--wd", type=float, default=6e-5)
     args = parser.parse_args()
     main(args)
