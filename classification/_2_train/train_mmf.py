@@ -1,4 +1,4 @@
-# train.py (adapted for CIFAR-10 classification with YOLOv1Classifier)
+# train_mmf.py (adapted for CIFAR-10 classification with YOLOv1Classifier)
 
 import sys
 import datetime
@@ -17,7 +17,7 @@ from torch.amp import GradScaler, autocast
 scaler = GradScaler()
 
 from classification._1_dataset.dataset import CIFAR10Dataset
-from model import YOLOv1Classifier 
+from model import YOLOv1ClassifierMMF  
 
 GLOBAL_LAST_EPOCH = 0
 GLOBAL_BEST_VAL_LOSS = float('inf')
@@ -159,7 +159,7 @@ def main(args):
     print(f"Using device: {device}")
 
     # Model
-    model = YOLOv1Classifier(num_classes=10).to(device)
+    model = YOLOv1ClassifierMMF(num_classes=10).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -403,15 +403,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train YOLOv1-style Classifier on CIFAR-10")
 
     # Save directory
-    parser.add_argument("--start_count",   type=int,   default=23,       help="Starting count for model directory naming")
-    parser.add_argument("--save_dir",     type=str,   default="classification/_2_train/runs", help="Save directory")
+    parser.add_argument("--start_count",   type=int,   default=0,       help="Starting count for model directory naming")
+    parser.add_argument("--save_dir",     type=str,   default="classification/_2_train/runs_mmf", help="Save directory")
 
     # Resume directory: resume_path or None
-    resume_path = "classification/_2_train/runs/XX/interrupted_epoch_XX.pth"
+    resume_path = "classification/_2_train/runs_mmf/XX/interrupted_epoch_XX.pth"
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Training parameters
-    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--warmup_epochs", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=2000)
     parser.add_argument("--lr", type=float, default=8e-4)

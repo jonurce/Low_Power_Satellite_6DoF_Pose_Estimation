@@ -49,3 +49,6 @@ tensorboard --logdir=bbox/yolo_replica/_2_train/runs --port=6006
 
 # See GPU utilization (refreshes every 500 ms)
 nvidia-smi -lms 500  
+
+# See GPU utilization with full process name
+nvidia-smi --query-compute-apps=pid,used_gpu_memory,process_name --format=csv,noheader

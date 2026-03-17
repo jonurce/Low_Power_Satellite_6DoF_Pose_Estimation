@@ -179,6 +179,7 @@ class YOLOv1ClassifierMMF(nn.Module):
         # x: [B, 3, 32, 32]
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
         logits = self.head_classification(features)       # → [B, 10]
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
         return logits
     
     def get_probs(self, x, temperature=1.0):
@@ -290,6 +291,7 @@ class YOLOv1Bbox(nn.Module):
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
         features = self.backbone_yolo(features)
         logits = self.head_yolo(features)       # → [B, 10]
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
         return logits
     
     def get_probs(self, x, temperature=1.0):
@@ -401,6 +403,7 @@ class YOLOv1BboxMMF(nn.Module):
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
         features = self.backbone_yolo(features)
         logits = self.head_yolo(features)       # → [B, 10]
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
         return logits
     
     def get_probs(self, x, temperature=1.0):
