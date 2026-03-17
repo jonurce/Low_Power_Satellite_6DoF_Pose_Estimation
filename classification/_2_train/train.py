@@ -225,7 +225,7 @@ def main(args):
             model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=25, min_lr=args.lr/20)
             # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
             # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
             #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
@@ -287,7 +287,7 @@ def main(args):
             
             # GLOBAL_WARMUP_EPOCHS = args.warmup_epochs
             # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=25, min_lr=args.lr/20)
             # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
             # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
             #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
@@ -413,7 +413,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--warmup_epochs", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=2000)
-    parser.add_argument("--lr", type=float, default=6e-4)
+    parser.add_argument("--lr", type=float, default=8e-4)
     parser.add_argument("--wd", type=float, default=6e-5)
     args = parser.parse_args()
     main(args)

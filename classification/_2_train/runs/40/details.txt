@@ -1,0 +1,18 @@
+Classification Training Run
+CIFAR10 32x32px RGB input
+-------------------------
+Model Info:
+Total parameters: 22,413,386
+Trainable parameters: 22,413,386
+-------------------------
+Batch size:      1024
+Max epochs:      2000
+Learning rate:   0.001
+Weight decay:   6e-05
+Device:          x2 NVIDIA GeForce RTX 3090 Ti
+-------------------------
+Results:
+Final epoch: 135
+Best val loss: 1.633057
+Last val loss: 24988.615625
+Early stopping triggered

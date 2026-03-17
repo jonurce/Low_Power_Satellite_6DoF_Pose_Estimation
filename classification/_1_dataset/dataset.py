@@ -48,7 +48,7 @@ class CIFAR10Dataset(Dataset):
 
             # Improved transform
             self.transform_improved = T.Compose([
-                # Random scaling and translation up to 20%
+                # 1. Random scaling and translation up to 20%
                 T.RandomAffine(
                     degrees=0,
                     translate=(0.2, 0.2),
@@ -58,7 +58,7 @@ class CIFAR10Dataset(Dataset):
                     fill=0
                 ),
                 
-                # Stronger exposure/saturation + add contrast & small hue
+                # 2. Stronger exposure/saturation + add contrast & small hue
                 T.ColorJitter(
                     brightness=(0.5, 1.5),     # wider range: 0.5× to 1.5×
                     contrast=(0.7, 1.3),       # add mild contrast jitter
@@ -66,17 +66,23 @@ class CIFAR10Dataset(Dataset):
                     hue=(-0.05, 0.05)          # small hue shift (safe on CIFAR)
                 ),
                 
-                # Add random horizontal flip (very effective on CIFAR)
+                # 3. Add random horizontal flip (very effective on CIFAR)
                 T.RandomHorizontalFlip(p=0.5),
 
                 T.ToTensor(),
                 
-                # Add random erasing (cutout) – huge gain on CIFAR
+                # 4. Add random erasing (cutout) – huge gain on CIFAR
                 T.RandomErasing(
                     p=0.4,                     # probability
                     scale=(0.02, 0.25),        # erase 2–25% of area
                     ratio=(0.3, 3.3),          # aspect ratio range
                     value="random"             # random pixel values
+                ),
+
+                # 5. Normalization (must be last)
+                T.Normalize(
+                    mean=[0.4914, 0.4822, 0.4465],
+                    std=[0.2470, 0.2435, 0.2616]
                 ),
                 
             ])
@@ -122,20 +128,20 @@ class CIFAR10Dataset(Dataset):
                 
                 
                 # 6. Normalization (must be last)
-                # T.Normalize(
-                #     mean=[0.4914, 0.4822, 0.4465],
-                #     std=[0.2470, 0.2435, 0.2616]
-                # ),
+                T.Normalize(
+                    mean=[0.4914, 0.4822, 0.4465],
+                    std=[0.2470, 0.2435, 0.2616]
+                ),
             ])
 
         else:
             self.transform = T.Compose([
                 T.ToTensor(),
                 # 6. Normalization (must be last)
-                # T.Normalize(
-                #     mean=[0.4914, 0.4822, 0.4465],
-                #     std=[0.2470, 0.2435, 0.2616]
-                # ),
+                T.Normalize(
+                    mean=[0.4914, 0.4822, 0.4465],
+                    std=[0.2470, 0.2435, 0.2616]
+                ),
             ])
         
         # Load CIFAR-10 (downloads automatically if missing)

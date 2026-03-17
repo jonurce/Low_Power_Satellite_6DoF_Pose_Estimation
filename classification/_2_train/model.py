@@ -114,73 +114,57 @@ class YOLOv1ClassifierMMF(nn.Module):
         self.backbone_classification = nn.Sequential(
 
             # Conv1: 7x7x64-s-2 + MaxPool: 2x2-s-2
-            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3), #1
+            MMFConv2d(3, 64, kernel_size=7, stride=2, padding=3), #1
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv2: 3x3x192 + MaxPool: 2x2-s-2
-            nn.Conv2d(64, 192, kernel_size=3, padding=1), #2
+            MMFConv2d(64, 192, kernel_size=3, padding=1), #2
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv3–6: 1x1x128 + 3x3x256 + 1x1x256 + 3x3x512 + MaxPool: 2x2-s-2
-            nn.Conv2d(192, 128, kernel_size=1), #3
+            MMFConv2d(192, 128, kernel_size=1), #3
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=3, padding=1), #4
+            MMFConv2d(128, 256, kernel_size=3, padding=1), #4
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 256, kernel_size=1), #5
+            MMFConv2d(256, 256, kernel_size=1), #5
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #6
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #6
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv7–16: (1x1x256 + 3x3x512)x4 + 1x1x512 + 3x3x1024 + Maxpool:2x2-s-2
-            nn.Conv2d(512, 256, kernel_size=1), #7
+            MMFConv2d(512, 256, kernel_size=1), #7
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #8
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #8
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #9
+            MMFConv2d(512, 256, kernel_size=1), #9
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #10
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #10
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #11
+            MMFConv2d(512, 256, kernel_size=1), #11
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #12
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #12
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #13
+            MMFConv2d(512, 256, kernel_size=1), #13
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #14
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #14
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 512, kernel_size=1), #15
+            MMFConv2d(512, 512, kernel_size=1), #15
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #16
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #16
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv17–20: (1x1x512 + 3x3x1024)x2
-            nn.Conv2d(1024, 512, kernel_size=1), #17
+            MMFConv2d(1024, 512, kernel_size=1), #17
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #18
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #18
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 512, kernel_size=1), #19
+            MMFConv2d(1024, 512, kernel_size=1), #19
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #20
-            nn.LeakyReLU(0.1, inplace=True),
-        )
-
-        # Backbone yolo: 4 additional convolutional layers + maxpools (exact from YOLOv1 paper)
-        self.backbone_yolo = nn.Sequential(
-
-            # Conv21–22: 3x3x1024 + 3x3x1024-s-2
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #21
-            nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1, stride=2), #22
-            nn.LeakyReLU(0.1, inplace=True),
-
-            # Conv23-24: 3x3x1024 + 3x3x1024
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #23
-            nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #24
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #20
             nn.LeakyReLU(0.1, inplace=True),
         )
         
@@ -188,17 +172,7 @@ class YOLOv1ClassifierMMF(nn.Module):
         self.head_classification = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),          # average-pooling layer to 1×1
             nn.Flatten(),                           # flatten [B, 1024, 1, 1] → [B, 1024]
-            nn.Linear(1024, num_classes)            # single fully connected layer
-        )
-
-        # YOLO head (adapted from YOLOv1's FC layers)
-        self.head_yolo = nn.Sequential(
-            # will do this later
-            nn.Flatten(),
-            nn.Linear(1024 * 1 * 1, 4096),  # after all pools → 1×1 feature map
-            nn.LeakyReLU(0.1, inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(4096, num_classes)
+            MMFLinear(1024, num_classes)            # single fully connected layer
         )
 
     def forward(self, x):
@@ -301,13 +275,6 @@ class YOLOv1Bbox(nn.Module):
             nn.LeakyReLU(0.1, inplace=True),
         )
         
-        # Classification head: exactly as described in YOLOv1 paper (first 20 convs + avg pool + FC)
-        self.head_classification = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),          # average-pooling layer to 1×1
-            nn.Flatten(),                           # flatten [B, 1024, 1, 1] → [B, 1024]
-            nn.Linear(1024, num_classes)            # single fully connected layer
-        )
-
         # YOLO head (adapted from YOLOv1's FC layers)
         self.head_yolo = nn.Sequential(
             # will do this later
@@ -321,7 +288,8 @@ class YOLOv1Bbox(nn.Module):
     def forward(self, x):
         # x: [B, 3, 32, 32]
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
-        logits = self.head_classification(features)       # → [B, 10]
+        features = self.backbone_yolo(features)
+        logits = self.head_yolo(features)       # → [B, 10]
         return logits
     
     def get_probs(self, x, temperature=1.0):
@@ -348,57 +316,57 @@ class YOLOv1BboxMMF(nn.Module):
         self.backbone_classification = nn.Sequential(
 
             # Conv1: 7x7x64-s-2 + MaxPool: 2x2-s-2
-            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3), #1
+            MMFConv2d(3, 64, kernel_size=7, stride=2, padding=3), #1
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv2: 3x3x192 + MaxPool: 2x2-s-2
-            nn.Conv2d(64, 192, kernel_size=3, padding=1), #2
+            MMFConv2d(64, 192, kernel_size=3, padding=1), #2
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv3–6: 1x1x128 + 3x3x256 + 1x1x256 + 3x3x512 + MaxPool: 2x2-s-2
-            nn.Conv2d(192, 128, kernel_size=1), #3
+            MMFConv2d(192, 128, kernel_size=1), #3
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=3, padding=1), #4
+            MMFConv2d(128, 256, kernel_size=3, padding=1), #4
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 256, kernel_size=1), #5
+            MMFConv2d(256, 256, kernel_size=1), #5
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #6
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #6
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv7–16: (1x1x256 + 3x3x512)x4 + 1x1x512 + 3x3x1024 + Maxpool:2x2-s-2
-            nn.Conv2d(512, 256, kernel_size=1), #7
+            MMFConv2d(512, 256, kernel_size=1), #7
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #8
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #8
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #9
+            MMFConv2d(512, 256, kernel_size=1), #9
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #10
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #10
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #11
+            MMFConv2d(512, 256, kernel_size=1), #11
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #12
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #12
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 256, kernel_size=1), #13
+            MMFConv2d(512, 256, kernel_size=1), #13
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), #14
+            MMFConv2d(256, 512, kernel_size=3, padding=1), #14
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 512, kernel_size=1), #15
+            MMFConv2d(512, 512, kernel_size=1), #15
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #16
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #16
             nn.LeakyReLU(0.1, inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
             # Conv17–20: (1x1x512 + 3x3x1024)x2
-            nn.Conv2d(1024, 512, kernel_size=1), #17
+            MMFConv2d(1024, 512, kernel_size=1), #17
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #18
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #18
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 512, kernel_size=1), #19
+            MMFConv2d(1024, 512, kernel_size=1), #19
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(512, 1024, kernel_size=3, padding=1), #20
+            MMFConv2d(512, 1024, kernel_size=3, padding=1), #20
             nn.LeakyReLU(0.1, inplace=True),
         )
 
@@ -406,39 +374,33 @@ class YOLOv1BboxMMF(nn.Module):
         self.backbone_yolo = nn.Sequential(
 
             # Conv21–22: 3x3x1024 + 3x3x1024-s-2
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #21
+            MMFConv2d(1024, 1024, kernel_size=3, padding=1), #21
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1, stride=2), #22
+            MMFConv2d(1024, 1024, kernel_size=3, padding=1, stride=2), #22
             nn.LeakyReLU(0.1, inplace=True),
 
             # Conv23-24: 3x3x1024 + 3x3x1024
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #23
+            MMFConv2d(1024, 1024, kernel_size=3, padding=1), #23
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(1024, 1024, kernel_size=3, padding=1), #24
+            MMFConv2d(1024, 1024, kernel_size=3, padding=1), #24
             nn.LeakyReLU(0.1, inplace=True),
-        )
-        
-        # Classification head: exactly as described in YOLOv1 paper (first 20 convs + avg pool + FC)
-        self.head_classification = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),          # average-pooling layer to 1×1
-            nn.Flatten(),                           # flatten [B, 1024, 1, 1] → [B, 1024]
-            nn.Linear(1024, num_classes)            # single fully connected layer
         )
 
         # YOLO head (adapted from YOLOv1's FC layers)
         self.head_yolo = nn.Sequential(
             # will do this later
             nn.Flatten(),
-            nn.Linear(1024 * 1 * 1, 4096),  # after all pools → 1×1 feature map
+            MMFLinear(1024 * 1 * 1, 4096),  # after all pools → 1×1 feature map
             nn.LeakyReLU(0.1, inplace=True),
             nn.Dropout(0.5),
-            nn.Linear(4096, num_classes)
+            MMFLinear(4096, num_classes)
         )
 
     def forward(self, x):
         # x: [B, 3, 32, 32]
         features = self.backbone_classification(x)        # → [B, 1024, 1, 1]
-        logits = self.head_classification(features)       # → [B, 10]
+        features = self.backbone_yolo(features)
+        logits = self.head_yolo(features)       # → [B, 10]
         return logits
     
     def get_probs(self, x, temperature=1.0):
