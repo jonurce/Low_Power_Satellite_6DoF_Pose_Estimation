@@ -47,7 +47,7 @@ class CIFAR10Dataset(Dataset):
             ])
 
             # Improved transform
-            self.transform = T.Compose([
+            self.transform_improved = T.Compose([
                 # Random scaling and translation up to 20%
                 T.RandomAffine(
                     degrees=0,
@@ -81,9 +81,61 @@ class CIFAR10Dataset(Dataset):
                 
             ])
 
+            # Even more improved transform
+            self.transform= T.Compose([
+                # 1. Geometric augmentations (stronger than before)
+                T.RandomAffine(
+                    degrees=15,                   # ← added mild rotation (±15°)
+                    translate=(0.2, 0.2),
+                    scale=(0.75, 1.25),           # slightly wider: 75–125%
+                    shear=10,                     # ← added small shear (±10°)
+                    interpolation=T.InterpolationMode.BILINEAR,
+                    fill=0
+                ),
+                
+                # 2. Strong color jitter (wider ranges)
+                T.ColorJitter(
+                    brightness=(0.4, 1.6),        # wider exposure
+                    contrast=(0.5, 1.5),
+                    saturation=(0.4, 1.6),
+                    hue=(-0.08, 0.08)             # a bit more hue variation
+                ),
+                
+                # 3. Flip + very effective on CIFAR
+                T.RandomHorizontalFlip(p=0.5),
+
+                # 4. AutoAugment or RandAugment policy (very strong gain on CIFAR)
+                T.RandAugment(                    # ← new: RandAugment (default policy)
+                    num_ops=2,
+                    magnitude=9
+                ),
+                
+                T.ToTensor(),
+                
+                # 5. Cutout / erasing — stronger probability & range
+                T.RandomErasing(
+                    p=0.5,                        # ↑ higher probability
+                    scale=(0.02, 0.4),            # larger possible erase area
+                    ratio=(0.3, 3.3),
+                    value="random"
+                ),
+                
+                
+                # 6. Normalization (must be last)
+                # T.Normalize(
+                #     mean=[0.4914, 0.4822, 0.4465],
+                #     std=[0.2470, 0.2435, 0.2616]
+                # ),
+            ])
+
         else:
             self.transform = T.Compose([
                 T.ToTensor(),
+                # 6. Normalization (must be last)
+                # T.Normalize(
+                #     mean=[0.4914, 0.4822, 0.4465],
+                #     std=[0.2470, 0.2435, 0.2616]
+                # ),
             ])
         
         # Load CIFAR-10 (downloads automatically if missing)
