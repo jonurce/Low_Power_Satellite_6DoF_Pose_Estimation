@@ -5,7 +5,7 @@ Model Info:
 Total parameters: 22,413,407
 Trainable parameters: 22,413,407
 -------------------------
-Batch size:      16
+Batch size:      1024
 Max epochs:      2000
 Learning rate:   0.0008
 Weight decay:   6e-05
