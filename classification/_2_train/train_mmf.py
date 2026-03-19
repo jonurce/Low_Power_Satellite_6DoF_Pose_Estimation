@@ -43,9 +43,11 @@ def train_one_epoch(model, epoch, writer, loader, optimizer, scheduler, criterio
         images, labels = images.to(device), labels.to(device)
 
         optimizer.zero_grad()
-        with autocast(device_type='cuda'):
-            logits = model(images)  # [B, 10]
-            loss = criterion(logits.float(), labels)
+
+        """ Disabled autocast, which casts to float16, as custom kernels expect float32 """
+        # with autocast(device_type='cuda'):
+        logits = model(images)  # [B, 10]
+        loss = criterion(logits.float(), labels)
 
         # loss.backward()
         # optimizer.step()
@@ -223,7 +225,8 @@ def main(args):
         if torch.cuda.device_count() > 1:
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
-            model = torch.compile(model)
+            """ Disabled torch.compile, which may not know to handle custom kernels"""
+            # model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
             scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
@@ -283,7 +286,8 @@ def main(args):
         if torch.cuda.device_count() > 1:
             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
             model = nn.DataParallel(model)
-            model = torch.compile(model)
+            """ Disabled torch.compile, which may not know to handle custom kernels"""
+            #model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             
             # GLOBAL_WARMUP_EPOCHS = args.warmup_epochs

@@ -14,40 +14,32 @@ mmf_linear_ext = load(
 ################ MMF Linear Function ################
 class MMFLinearFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, w, bias, scale):
-        ctx.save_for_backward(x, w, bias)
-        ctx.scale = scale
-        return mmf_linear_ext.mmf_linear(x, w, bias, scale)
+    def forward(ctx, X, W, b, eps):
+        O, Y_hat, W_tilde, mu, var_, r = mmf_linear_ext.mmf_linear_forward(X, W, b, eps)
+        ctx.save_for_backward(W_tilde, Y_hat, X, mu, var_, r)
+        ctx.N = X.size(1)
+        return O
 
     @staticmethod
-    def backward(ctx, grad_output):
-        x, w, bias = ctx.saved_tensors
-
-        grad_output_scaled = grad_output * ctx.scale
-
-        grad_x    = grad_output_scaled @ w                       # [B, in_features]
-        grad_w    = grad_output_scaled.t() @ x                   # [out_features, in_features]
-        grad_bias = grad_output_scaled.sum(dim=0)                # [out_features]
-
-        return grad_x, grad_w, grad_bias, None  # None for scale
+    def backward(ctx, dO):
+        W_tilde, Y_hat, X, mu, var_, r = ctx.saved_tensors
+        dX, dW, db = mmf_linear_ext.mmf_linear_backward(dO.contiguous(), W_tilde, Y_hat, X, mu, var_, r)
+        return dX, dW, db, None  # None for eps
 
 ################ MMF Linear Layer ################
 class MMFLinear(nn.Module):
-    def __init__(self, in_features, out_features, scale_init=1.0):
+    def __init__(self, in_features, out_features, eps=1e-8):
         super().__init__()
         # Ternary weights: -1, 0, +1 [C_out, C_in]
-        self.weight = nn.Parameter(torch.randint(-1, 2, (out_features, in_features)).float())
+        self.W   = nn.Parameter(torch.randn(in_features, out_features) * 0.02)
 
         # Bias [C_out]
-        self.bias = nn.Parameter(torch.zeros(out_features))
+        self.b   = nn.Parameter(torch.zeros(out_features))
 
-        # Learnable scaling factor (very important!) [scalar]
-        self.scale = nn.Parameter(torch.tensor(scale_init)) 
+        self.eps = eps
 
-    def forward(self, x):
-        # Snap weights to ternary via STE
-        w = self.weight - (self.weight - self.weight.detach().sign()).detach()
-        return MMFLinearFunction.apply(x, w, self.bias, self.scale.item())
+    def forward(self, X):
+        return MMFLinearFunction.apply(X, self.W, self.b, self.eps)
 
 
 
@@ -65,50 +57,37 @@ mmf_conv2d_ext = load(
 ################ MMF Conv2d Function ################
 class MMFConv2dFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, w, bias, scale, stride, padding):
-        # Save what we need for backward
-        ctx.save_for_backward(x, w, bias)
-        ctx.scale   = scale
+    def forward(ctx, X, W, b, stride, padding, eps):
+        O, Y_hat, W_tilde, mu, var_, r = mmf_conv2d_ext.mmf_conv2d_forward(X, W, b, stride, padding, eps)
+        ctx.save_for_backward(W_tilde, Y_hat, X, mu, var_, r)
         ctx.stride  = stride
         ctx.padding = padding
-        return mmf_conv2d_ext.mmf_conv2d(x, w, bias, scale, stride, padding)
+        return O
 
     @staticmethod
-    def backward(ctx, grad_output):
-        x, w, bias = ctx.saved_tensors
-        # Fall back to PyTorch autograd for the backward pass
-        # using F.conv2d which has a registered backward
-        grad_output = grad_output * ctx.scale
+    def backward(ctx, dO):
+        W_tilde, Y_hat, X, mu, var_, r = ctx.saved_tensors
+        dX, dW, db = mmf_conv2d_ext.mmf_conv2d_backward(dO.contiguous(), W_tilde, Y_hat, X, mu, var_, r)
+        return dX, dW, db, None, None, None  # None for stride, padding, eps
 
-        grad_x    = torch.nn.grad.conv2d_input(x.shape, w, grad_output, stride=ctx.stride, padding=ctx.padding)
-        grad_w    = torch.nn.grad.conv2d_weight(x, w.shape, grad_output, stride=ctx.stride, padding=ctx.padding)
-        grad_bias = grad_output.sum(dim=(0, 2, 3))
-        grad_scale = None  # handled by STE in the module
-
-        return grad_x, grad_w, grad_bias, grad_scale, None, None
     
 ################ MMF Conv2d Layer ################
 class MMFConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, scale_init=1.0):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, eps=1e-8):
         super().__init__()
-        # Ternary weights: -1, 0, +1 [C_out, C_in, kH, kW]
-        weight_shape = (out_channels, in_channels, kernel_size, kernel_size)
-        self.weight = nn.Parameter(torch.randint(-1, 2, weight_shape).float())
+        # Weights: -1, 0, +1 [C_out, C_in, kH, kW]
+        self.W = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size) * 0.02)
 
         # Bias [C_out]
-        self.bias = nn.Parameter(torch.zeros(out_channels))
-
-        # Learnable scaling factor (very important!) [scalar]
-        self.scale = nn.Parameter(torch.tensor(scale_init)) 
+        self.b = nn.Parameter(torch.zeros(out_channels))
 
         # Stride and padding from Conv2d
         self.stride = stride
         self.padding = padding
+        self.eps     = eps
 
-    def forward(self, x):
-        # STE: forward sees snapped ternary, gradients flow through self.weight
-        w = self.weight - (self.weight - self.weight.detach().sign()).detach()
-        return MMFConv2dFunction.apply(x, w, self.bias, self.scale.item(), self.stride, self.padding)
+    def forward(self, X):
+        return MMFConv2dFunction.apply(X, self.W, self.b, self.stride, self.padding, self.eps)
 
 
 
@@ -119,15 +98,22 @@ class MMFConv2d(nn.Module):
 ################ Tests ################
 if __name__ == "__main__":
     print("Testing MMFLinear...")
-    x = torch.randn(32, 128, device="cuda")  # batch 32, dim 128
+    x = torch.randn(32, 128, device="cuda", requires_grad=True)  # batch 32, dim 128
     lin_mmf = MMFLinear(128, 64).cuda()
     out_mmf = lin_mmf(x)
     print("MMF output shape:", out_mmf.shape) # [32, 64]
+    out_mmf.sum().backward()
+    print("dX shape:", x.grad.shape)    # [32, 128]
+    print("dW shape:", lin_mmf.W.grad.shape)  # [128, 64]
 
     print("\n") 
 
     print("Testing MMFConv2d...")
-    x = torch.randn(16, 3, 32, 32, device="cuda")  # batch 16, 3 channels, 32×32
+    x = torch.randn(16, 3, 32, 32, device="cuda", requires_grad=True)  # batch 16, 3 channels, 32×32
     conv_mmf = MMFConv2d(3, 64, kernel_size=3, stride=1, padding=1).cuda()
     out_mmf = conv_mmf(x)
     print("MMF output shape:", out_mmf.shape)  # [16, 64, 32, 32]
+    out_mmf.sum().backward()
+    print("dX shape:", x.grad.shape)       # [16, 3, 32, 32]
+    print("dW shape:", conv_mmf.W.grad.shape) # [64, 3, 3, 3]
+    print("db shape:", conv_mmf.b.grad.shape) # [64]
