@@ -419,7 +419,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--warmup_epochs", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=2000)
-    parser.add_argument("--lr", type=float, default=4e-2) # higher lr for mmf
+    parser.add_argument("--lr", type=float, default=10) # higher lr for mmf
     parser.add_argument("--wd", type=float, default=0) # lower for mmf
     args = parser.parse_args()
     main(args)

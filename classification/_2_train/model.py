@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 
-from classification._2_train.layers_mmf_1 import MMFLinear, MMFConv2d
+from classification._2_train.layers_mmf_3 import MMFLinear, MMFConv2d
 
 ###################### YOLOv1 Classification ######################
 class YOLOv1Classifier(nn.Module):

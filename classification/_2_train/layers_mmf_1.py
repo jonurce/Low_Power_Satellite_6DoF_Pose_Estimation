@@ -89,7 +89,7 @@ class MMFConv2dFunction(torch.autograd.Function):
     
 ################ MMF Conv2d Layer ################
 class MMFConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, scale_init=1.0):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
         super().__init__()
         # Ternary weights: -1, 0, +1 [C_out, C_in, kH, kW]
         weight_shape = (out_channels, in_channels, kernel_size, kernel_size)
@@ -131,3 +131,25 @@ if __name__ == "__main__":
     conv_mmf = MMFConv2d(3, 64, kernel_size=3, stride=1, padding=1).cuda()
     out_mmf = conv_mmf(x)
     print("MMF output shape:", out_mmf.shape)  # [16, 64, 32, 32]
+
+    print("\n") 
+
+    layer = MMFConv2d(3, 64, kernel_size=3, padding=1).cuda()
+    bn = nn.BatchNorm2d(64).cuda()
+    fc = nn.Linear(64, 10).cuda()
+
+    x = torch.randn(4, 3, 32, 32, device='cuda')
+    labels = torch.randint(0, 10, (4,), device='cuda')
+
+    out = layer(x)           # [4, 64, 32, 32]
+    out = bn(out)
+    out = out.mean(dim=[2,3]) # [4, 64]
+    out = fc(out)             # [4, 10]
+    loss = nn.CrossEntropyLoss()(out, labels)
+    loss.backward()
+
+    print("grad norm:", layer.weight.grad.norm().item())
+    print("grad std:", layer.weight.grad.std().item())
+    # Check if all filters are still identical
+    print("filter 0 vs filter 1 identical:", 
+        layer.weight.grad[0].equal(layer.weight.grad[1]))
