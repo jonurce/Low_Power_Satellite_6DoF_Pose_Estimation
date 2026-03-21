@@ -353,8 +353,9 @@ def main(args):
         GLOBAL_LAST_OPTIMIZER_STATE = optimizer.state_dict()
         GLOBAL_LAST_SCHEDULER_STATE = scheduler.state_dict()
 
-        # Scheduler step per epoch for ReduceLROnPlateau / CosineAnnealingLR
-        scheduler.step(val_loss)
+        # Scheduler step per epoch 
+        # scheduler.step(val_loss) # ReduceLROnPlateau -> needs val_loss
+        scheduler.step() # CosineAnnealingLR -> empty parenthesis
 
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
@@ -430,7 +431,7 @@ if __name__ == "__main__":
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=1024)
     parser.add_argument("--epochs", type=int, default=600)
-    parser.add_argument("--lr", type=float, default=6e-3) # higher lr for mmf
+    parser.add_argument("--lr", type=float, default=5e-3) # higher lr for mmf
     parser.add_argument("--wd", type=float, default=0) # lower for mmf
     args = parser.parse_args()
     main(args)
