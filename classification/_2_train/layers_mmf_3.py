@@ -19,11 +19,11 @@ class MMFLinearFunction(torch.autograd.Function):
         y_norm = r * (X - mu)                           # [M, N]
 
         # Inside Step 2: activation_quant
-        s_act  = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values  # [M, 1]
+        s_act  = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-8)  # [M, 1]
         y_tilde = (s_act * y_norm).round().clamp(-128, 127) / s_act     # [M, N]
 
         # Step 3: On chip: W_tilde <- weight_quant(W)
-        s_w     = 1.0 / W.abs().mean()                          # scalar
+        s_w     = 1.0 / W.abs().mean().clamp(min=1e-8) # scalar
         
         # w_tilde [K, N] -> ternary: {-mean(|W|), 0, +mean(|W|)} = {-1/s_w, 0, +1/s_w}
         # w_tilde = (s_w * W).round().clamp(-1, 1) / s_w # no gradient flows through round/clamp
@@ -47,7 +47,7 @@ class MMFLinearFunction(torch.autograd.Function):
 
         # Step 3. On chip: dX, Y_tilde <- rms_norm_bwd(dY, X, mu, var, r)
         y_norm  = r * (X - mu)
-        s_act   = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values
+        s_act   = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-8)
         Y_tilde = (s_act * y_norm).round().clamp(-128, 127) / s_act
 
         dsigma2 = (dY * (X - mu) * -0.5 * r**3).sum(dim=-1, keepdim=True)  # [M, 1]
@@ -107,7 +107,7 @@ class MMFConv2dFunction(torch.autograd.Function):
         y_norm = r * (X_flat - mu)                           # [M, C_in]
 
         # Inside Step 2: activation_quant
-        s_act  = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values  # [M, 1]
+        s_act  = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-8)  # [M, 1]
         y_tilde = (s_act * y_norm).round().clamp(-128, 127) / s_act     # [M, C_in]
 
         # Reshape y_tilde back to [B, C_in, H_in, W_in] for conv2d
@@ -115,7 +115,7 @@ class MMFConv2dFunction(torch.autograd.Function):
 
 
         ### Step 3: On chip: W_tilde <- weight_quant(W)
-        s_w     = 1.0 / W.abs().mean() # scalar
+        s_w     = 1.0 / W.abs().mean().clamp(min=1e-8) # scalar
         
         # w_tilde [C_out, C_in, kH, kW] -> ternary: {-mean(|W|), 0, +mean(|W|)} = {-1/s_w, 0, +1/s_w}
         # w_tilde = (s_w * W).round().clamp(-1, 1) / s_w # no gradient flows through round/clamp
@@ -126,14 +126,17 @@ class MMFConv2dFunction(torch.autograd.Function):
 
 
         ### Step 5: Store to HBM: O (return) + mu, var, r + X, W, b
-        ctx.save_for_backward(X, W, b, mu, var, r, stride, padding)
+        ctx.save_for_backward(X, W, b, mu, var, r)
+        ctx.stride = stride
+        ctx.padding = padding
 
         return O # [B, C_out, H_out, W_out]
 
     ### Step 1. Load from HBM: X, W, b, O (not used), mu, var, r, dO (HBM slow)
     @staticmethod
     def backward(ctx, dO):
-        X, W, b, mu, var, r, stride, padding = ctx.saved_tensors
+        X, W, b, mu, var, r = ctx.saved_tensors
+        stride, padding = ctx.stride, ctx.padding
 
         B, C_in, H_in, W_in = X.shape
 
@@ -148,7 +151,7 @@ class MMFConv2dFunction(torch.autograd.Function):
         X_flat = X.permute(0, 2, 3, 1).reshape(-1, C_in)              # [M, C_in]
 
         y_norm  = r * (X_flat - mu)
-        s_act   = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values
+        s_act   = 127.0 / y_norm.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-8)
         Y_tilde = (s_act * y_norm).round().clamp(-128, 127) / s_act # [M, C_in]
 
         dsigma2 = (dY * (X_flat - mu) * -0.5 * r**3).sum(dim=-1, keepdim=True)  # [M, 1]
@@ -212,29 +215,29 @@ if __name__ == "__main__":
     print("\n") 
 
     print("Testing MMFConv2d...")
-    x = torch.randn(16, 3, 32, 32, device="cuda")  # batch 16, 3 channels, 32×32
+    x = torch.randn(16, 3, 32, 32, device="cuda", requires_grad=True)  # batch 16, 3 channels, 32×32
     conv_mmf = MMFConv2d(3, 64, kernel_size=3, stride=1, padding=1).cuda()
     out_mmf = conv_mmf(x)
     print("MMF output shape:", out_mmf.shape)  # [16, 64, 32, 32]
 
     print("\n") 
 
+    print("Testing MMFConv2d gradients...")
     layer = MMFConv2d(3, 64, kernel_size=3, padding=1).cuda()
-    bn = nn.BatchNorm2d(64).cuda()
     fc = nn.Linear(64, 10).cuda()
-
-    x = torch.randn(4, 3, 32, 32, device='cuda')
+    x = torch.randn(4, 3, 32, 32, device='cuda', requires_grad=True)
     labels = torch.randint(0, 10, (4,), device='cuda')
-
     out = layer(x)           # [4, 64, 32, 32]
-    out = bn(out)
     out = out.mean(dim=[2,3]) # [4, 64]
     out = fc(out)             # [4, 10]
     loss = nn.CrossEntropyLoss()(out, labels)
     loss.backward()
 
     print("grad norm:", layer.weight.grad.norm().item())
+    print("any nan:", layer.weight.grad.isnan().any().item())
     print("grad std:", layer.weight.grad.std().item())
-    # Check if all filters are still identical
     print("filter 0 vs filter 1 identical:", 
         layer.weight.grad[0].equal(layer.weight.grad[1]))
+    
+    
+    

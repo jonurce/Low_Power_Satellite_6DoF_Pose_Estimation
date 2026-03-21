@@ -2,11 +2,11 @@ Classification Training Run
 CIFAR10 32x32px RGB input
 -------------------------
 Model Info:
-Total parameters: 22,431,582
-Trainable parameters: 22,431,582
+Total parameters: 22,413,386
+Trainable parameters: 22,413,386
 -------------------------
 Batch size:      1024
-Max epochs:      2000
-Learning rate:   1
+Max epochs:      600
+Learning rate:   0.006
 Weight decay:   0
 Device:          x2 NVIDIA GeForce RTX 3090 Ti

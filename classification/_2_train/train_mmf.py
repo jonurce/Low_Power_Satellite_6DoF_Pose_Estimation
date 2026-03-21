@@ -25,11 +25,8 @@ GLOBAL_LAST_VAL_LOSS = float('inf')
 GLOBAL_LAST_TRAIN_LOSS = 0.0
 GLOBAL_LAST_MODEL_STATE = None
 GLOBAL_LAST_OPTIMIZER_STATE = None
-# GLOBAL_LAST_WARMUP_SCHEDULER_STATE = None
 GLOBAL_LAST_SCHEDULER_STATE = None
 GLOBAL_MODEL_DIR = ""
-GLOBAL_WARMUP_EPOCHS = 10
-
 
 ##################### Train one epoch #####################
 def train_one_epoch(model, epoch, writer, loader, optimizer, scheduler, criterion, device):
@@ -122,7 +119,6 @@ def save_on_interrupt():
             'epoch': GLOBAL_LAST_EPOCH,
             'model_state_dict': GLOBAL_LAST_MODEL_STATE,
             'optimizer_state_dict': GLOBAL_LAST_OPTIMIZER_STATE,
-            # 'warmup_scheduler_state_dict': GLOBAL_LAST_WARMUP_SCHEDULER_STATE,
             'scheduler_state_dict': GLOBAL_LAST_SCHEDULER_STATE,
             'best_val_loss': GLOBAL_LAST_VAL_LOSS,
             'hyperparameters': {
@@ -150,11 +146,34 @@ def save_on_interrupt():
 ###################### Register handler #####################
 signal.signal(signal.SIGINT, save_on_interrupt)
 
-###################### Warmup Lambda #####################
-def warmup_lambda(epoch):
-    if epoch < GLOBAL_WARMUP_EPOCHS:
-        return float(epoch) / float(max(1, GLOBAL_WARMUP_EPOCHS))
-    return 1.0
+###################### Print Network Zeros #####################
+def network_weights(model):
+    total_zeros   = 0
+    total_pos = 0
+    total_neg = 0
+    total_weights = 0
+    total_mean = 0.0
+    total_s_w = 0.0
+    num_layers = 0
+    for name, p in model.named_parameters():
+        if 'weight' in name:
+            s_w      = 1.0 / p.abs().mean().clamp(min=1e-8)
+            w_ternary     = (s_w * p).round().clamp(-1, 1)
+
+            total_zeros   += (w_ternary == 0).sum().item()
+            total_pos   += (w_ternary > 0).sum().item()
+            total_neg   += (w_ternary < 0).sum().item()
+            total_weights += w_ternary.numel()
+            total_mean += p.abs().mean().item()
+            total_s_w += s_w.item()
+            num_layers += 1
+
+    avg_zeros = total_zeros / total_weights
+    avg_pos = total_pos / total_weights
+    avg_neg = total_neg / total_weights
+    avg_mean = total_mean / num_layers
+    avg_s_w = total_s_w / num_layers
+    return avg_zeros, avg_pos, avg_neg, avg_mean, avg_s_w
 
 ##################### Main #####################
 def main(args):
@@ -181,8 +200,7 @@ def main(args):
     val_ds   = CIFAR10Dataset(split='test')
 
     # Handle resume training
-    global GLOBAL_MODEL_DIR, GLOBAL_BEST_VAL_LOSS, GLOBAL_WARMUP_EPOCHS
-    GLOBAL_WARMUP_EPOCHS = args.warmup_epochs
+    global GLOBAL_MODEL_DIR, GLOBAL_BEST_VAL_LOSS
     if args.resume is None:
 
         # Create model directory with sequential numbering
@@ -229,9 +247,8 @@ def main(args):
             """ Disabled torch.compile, which may not know to handle custom kernels"""
             # model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
-            # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
-            # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
+            # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
+            scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.1 * args.lr)
             # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
             #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
 
@@ -291,14 +308,11 @@ def main(args):
             #model = torch.compile(model)
             optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
             
-            # GLOBAL_WARMUP_EPOCHS = args.warmup_epochs
-            # warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lambda)
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
-            # scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - GLOBAL_WARMUP_EPOCHS, eta_min=1e-6)
+            # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, min_lr=args.lr/20)
+            scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=0.1 * args.lr)
             # scheduler = OneCycleLR(optimizer, max_lr=args.lr * 1.1, total_steps=len(train_loader) * args.epochs,
             #     pct_start=0.03, anneal_strategy='cos', div_factor=2, final_div_factor=1e5)
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            # warmup_scheduler.load_state_dict(checkpoint['warmup_scheduler_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         start_epoch = checkpoint['epoch'] + 1
@@ -307,6 +321,13 @@ def main(args):
 
     # Training loop
     for epoch in range(args.epochs):
+
+        avg_zeros, avg_pos, avg_neg, avg_mean, avg_s_z = network_weights(model)
+        writer.add_scalar("Weights/zero", avg_zeros, epoch)
+        writer.add_scalar("Weights/pos", avg_pos, epoch)
+        writer.add_scalar("Weights/neg", avg_neg, epoch)
+        writer.add_scalar("Weights/mean", avg_mean, epoch)
+        writer.add_scalar("Weights/s_z", avg_s_z, epoch)
 
         train_loss, train_acc = train_one_epoch(model, epoch, writer, train_loader, optimizer, scheduler, criterion, device)
        
@@ -330,17 +351,10 @@ def main(args):
 
         GLOBAL_LAST_MODEL_STATE = model.state_dict()
         GLOBAL_LAST_OPTIMIZER_STATE = optimizer.state_dict()
-        # GLOBAL_LAST_WARMUP_SCHEDULER_STATE = warmup_scheduler.state_dict()
         GLOBAL_LAST_SCHEDULER_STATE = scheduler.state_dict()
 
-        # Scheduler step per epoch for ReduceLROnPlateau
+        # Scheduler step per epoch for ReduceLROnPlateau / CosineAnnealingLR
         scheduler.step(val_loss)
-
-        # Scheduler step per epoch with warmup for warmup + cosine scheduler
-        # if epoch < GLOBAL_WARMUP_EPOCHS:
-        #     warmup_scheduler.step()
-        # else:
-        #     scheduler.step()
 
         # Early stopping
         if val_loss < best_val_loss * (1 - min_delta_pct):
@@ -351,7 +365,6 @@ def main(args):
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                # 'warmup_scheduler_state_dict': warmup_scheduler.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'best_val_loss': best_val_loss,
                 'hyperparameters': {
@@ -375,7 +388,6 @@ def main(args):
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                # 'warmup_scheduler_state_dict': warmup_scheduler.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'best_val_loss': val_loss,
                 'hyperparameters': {
@@ -417,9 +429,8 @@ if __name__ == "__main__":
 
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=1024)
-    parser.add_argument("--warmup_epochs", type=int, default=10)
-    parser.add_argument("--epochs", type=int, default=2000)
-    parser.add_argument("--lr", type=float, default=10) # higher lr for mmf
+    parser.add_argument("--epochs", type=int, default=600)
+    parser.add_argument("--lr", type=float, default=6e-3) # higher lr for mmf
     parser.add_argument("--wd", type=float, default=0) # lower for mmf
     args = parser.parse_args()
     main(args)
