@@ -129,7 +129,7 @@ def main(args):
     class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     
     plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names, vmin=0, vmax=1000)
     plt.title(f'Confusion Matrix - {model_name} Model')
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test YOLOv1-style Classifier on CIFAR-10")
 
     # Model directory: model_path
-    model_name = "Best MMF" # "Baseline" or "Best MMF"
+    model_name = "Baseline" # "Baseline" or "Best MMF"
     model_path = f"classification/_2_train/runs/best/{model_name}/best_model.pth"
     cm_save_path = f"classification/_3_plots/runs/best/{model_name.replace(' ', '_')}_confusion_matrix.png"
     parser.add_argument("--model_path", type=str, default=model_path, help="Path to checkpoint to resume from")
