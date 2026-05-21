@@ -20,6 +20,8 @@ A PyTorch implementation of matrix multiplication-free convolutional neural netw
 
 Deep learning models for computer vision are computationally dominated by floating-point matrix multiplications (MatMul), which consume significant energy and memory bandwidth. This project implements **MatMul-Free (MMF) networks** that eliminate these operations entirely, replacing them with simple additions and subtractions through ternary weight quantization.
 
+See the 10 minute video presentation [here](https://youtu.be/-jWEjfmtxMs)
+
 ### Key Innovation
 
 Instead of standard convolution and linear layers, this implementation uses:
