@@ -143,8 +143,10 @@ MatMulFree_Image_Classification_Model/
 │   └── _3_plot/                   # Plot folder
 │       └── ...                    # Scripts used for plotting results
 │
-├── requirements.txt               # Python dependencies
-└── README.md                      # Project documentation
+├── Master Thesis Poster - Jon Urcelay.pdf          # Project Poster
+├── Master Thesis Final Report - Jon Urcelay.pdf    # Project Report
+├── requirements.txt                                # Python dependencies
+└── README.md                                       # Project documentation
 ```
 
 ---
