@@ -146,7 +146,7 @@ MatMulFree_Image_Classification_Model/
 │       └── ...                    # Scripts used for plotting results
 │
 ├── Master Thesis Poster - Jon Urcelay.pdf          # Project Poster
-├── Master Thesis Final Report - Jon Urcelay.pdf    # Project Report
+├── Master Thesis - Jon Urcelay.pdf                 # Project Report
 ├── requirements.txt                                # Python dependencies
 └── README.md                                       # Project documentation
 ```
