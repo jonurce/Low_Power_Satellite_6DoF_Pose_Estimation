@@ -22,7 +22,7 @@ Deep learning models for computer vision are computationally dominated by floati
 
 See the 10 minute video presentation [here](https://youtu.be/-jWEjfmtxMs)
 
-See the extended video presentation [here](https://youtu.be/estIxBYVTKg)
+See the extended video presentation [here](https://www.youtube.com/watch?v=tSRJdb3VcM0)
 
 ### Key Innovation
 
