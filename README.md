@@ -1,6 +1,6 @@
-# Matrix Multiplication Image Classification Model
+# Matrix Multiplication Free Image Classification Model
 
-A PyTorch implementation of matrix multiplication-free convolutional neural networks for CIFAR-10 image classification. This project replaces expensive matrix multiplications with addition/sustraction operations, exploring the model accuracy trade-off for potential computational efficiency when running the MMF on dedicated hardware.
+A PyTorch implementation of matrix multiplication free convolutional neural networks for CIFAR-10 image classification. This project replaces expensive matrix multiplications with addition/sustraction operations, exploring the model accuracy trade-off for potential computational efficiency when running the MMF on dedicated hardware.
 
 
 ---
